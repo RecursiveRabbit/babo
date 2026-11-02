@@ -121,13 +121,16 @@ def unreadable_lines(resident_dir: Path) -> list[tuple[Path, int]]:
 
 def iter_checkpoints(resident_dir: Path) -> list[Checkpoint]:
     out: list[Checkpoint] = []
+    new: dict[str, int] = {}
     for path, number, checkpoint in _records(resident_dir):
         if checkpoint is None:
             if (str(path), number) not in _reported:
                 _reported.add((str(path), number))
-                logger.warning("Babo: {} line {} isn't a checkpoint; skipped (babo doctor lists these)", path, number)
+                new[str(path)] = new.get(str(path), 0) + 1
             continue
         out.append(checkpoint)
+    for path, count in new.items():  # (once per file, not once per line)
+        logger.warning("Babo: {} line(s) in {} aren't checkpoints; shown to their resident (babo doctor lists them)", count, path)
     out.sort(key=lambda c: c.at)
     return out
 

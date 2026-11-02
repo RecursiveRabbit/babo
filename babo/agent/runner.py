@@ -22,7 +22,14 @@ from babo.agent.context_governance import (
     ProviderCompactionConsolidator,
     TranscriptBuilder,
 )
-from babo.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from babo.agent.hook import (
+    AgentHook,
+    AgentHookContext,
+    AgentRunHookContext,
+    begin_turn_watch,
+    end_of_tools_requested,
+    end_turn_watch,
+)
 from babo.agent.tools.context import tool_log_content_allowed
 from babo.agent.tools.execution import execute_tool_calls
 from babo.agent.tools.registry import ToolRegistry
@@ -54,6 +61,7 @@ from babo.utils.llm_runtime import LLMRuntime
 from babo.utils.prompt_templates import render_template
 from babo.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+    LOOP_STOPPED_MESSAGE,
     build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
     build_length_recovery_message,
@@ -469,6 +477,8 @@ class AgentRunner:
                 segment_context.stream_continues_current_message = not interrupted
                 await hook.on_stream_end(segment_context, resuming=True)
 
+        watch = begin_turn_watch()
+        ended_early = False
         for iteration in range(spec.max_iterations):
             # A resumed iteration must not inherit a previous iteration's failure.
             stop_reason = "completed"
@@ -619,6 +629,9 @@ class AgentRunner:
                 empty_content_retries = 0
                 length_recovery_parts.clear()
                 await hook.after_iteration(context)
+                if end_of_tools_requested():  # going round in circles: answer in words now
+                    ended_early = True
+                    break
                 continue
 
             if response.has_tool_calls:
@@ -851,7 +864,11 @@ class AgentRunner:
             await hook.after_iteration(context)
             break
         else:
-            stop_reason = "max_iterations"
+            ended_early = True
+        loop_stopped = end_of_tools_requested() is not None
+        end_turn_watch(watch)
+        if ended_early:
+            stop_reason = "loop_stopped" if loop_stopped else "max_iterations"
             terminal_content = None
             await end_length_segment(interrupted=False)
             if spec.finalize_on_max_iterations:
@@ -862,9 +879,10 @@ class AgentRunner:
                     usage,
                     request_state=request_state,
                     round_usages=round_usages,
+                    loop_stopped=loop_stopped,
                 )
             if terminal_content is None:
-                terminal_content = self._max_iterations_fallback(spec)
+                terminal_content = LOOP_STOPPED_MESSAGE if loop_stopped else self._max_iterations_fallback(spec)
             if length_recovery_parts:
                 terminal_tail = f"\n\n{terminal_content.lstrip()}"
                 final_content = (
@@ -1233,10 +1251,11 @@ class AgentRunner:
         *,
         request_state: ModelRequestState,
         round_usages: list[LLMUsage],
+        loop_stopped: bool = False,
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
         request_messages = await self.prepare_prompt(compaction.request_messages, messages)
-        retry_messages = self._budget_exhausted_finalization_messages(request_messages)
+        retry_messages = self._budget_exhausted_finalization_messages(request_messages, loop_stopped=loop_stopped)
         try:
             response = await self._request_no_tools(
                 spec,
@@ -1307,9 +1326,11 @@ class AgentRunner:
     @staticmethod
     def _budget_exhausted_finalization_messages(
         messages: list[dict[str, Any]],
+        *,
+        loop_stopped: bool = False,
     ) -> list[dict[str, Any]]:
         retry_messages = list(messages)
-        retry_messages.append(build_budget_exhausted_finalization_message())
+        retry_messages.append(build_budget_exhausted_finalization_message(loop_stopped=loop_stopped))
         return retry_messages
 
     @staticmethod

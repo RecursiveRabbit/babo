@@ -71,7 +71,8 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         ToolSpec(
             "read_note",
-            "Read a note: your files (knowledge/x.md, inbox/...), the commons (commons/...), CHARTER.md, HOUSE.md, or a skill (skill:<name>).",
+            "Read a note: your files (knowledge/x.md, inbox/...), the commons (commons/...), CHARTER.md, HOUSE.md, or a skill (skill:<name>). "
+            "A folder (rounds/, offices/) lists what's in it.",
             {"type": "object", "properties": {"path": _str("Path of the note.")}, "required": ["path"]},
             read_only=True,
         ),
@@ -348,7 +349,9 @@ class Toolbox:
         return "\n".join(lines)
 
     def read_note(self, path: str) -> str:
-        target = self.scope.resolve_ref(path)
+        target = self.scope.resolve_ref(path, folder=True)
+        if target.is_dir():
+            return self._listing(target)
         text = target.read_text(encoding="utf-8")
         from babo.baton import guides
 
@@ -367,6 +370,18 @@ class Toolbox:
         from babo.baton import tasks
 
         return tasks.update(self.town, self.resident_id, self.session or current_request_session_key() or "direct", items)
+
+    def _listing(self, folder: Path) -> str:
+        """What's in a folder the resident may read: its notes and subfolders, the way read_note takes them."""
+        shown = self.scope.display(folder).rstrip("/") + "/"
+        items = sorted(p for p in folder.iterdir() if not p.name.startswith(".") and self.scope.can_read(p))
+        if not items:
+            return f"{shown} is empty."
+        lines = [f"In {shown} ({len(items)}):"]
+        lines += [f"- {shown}{p.name}{'/' if p.is_dir() else ''}" for p in items[:100]]
+        if len(items) > 100:
+            lines.append(f"- … and {len(items) - 100} more")
+        return "\n".join(lines) + "\n\nRead one with read_note."
 
     def remember(self, text: str) -> str:
         if not text.strip():

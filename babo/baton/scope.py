@@ -43,8 +43,9 @@ class Scope:
         rel = resolved.relative_to(root)
         if not rel.parts:
             return False
-        if len(rel.parts) == 1:
-            return rel.parts[0] in PUBLIC_TOP_LEVEL
+        if len(rel.parts) == 1:  # (the town's folders themselves can be listed; what's in them is checked one by one)
+            return rel.parts[0] in PUBLIC_TOP_LEVEL or (rel.parts[0] in ("commons", "rounds", "offices", "residents", "crew")
+                                                      and resolved.is_dir())
         head = rel.parts[0]
         if head in ("commons", "rounds", "offices"):  # the town's knowledge, and how it works
             return True
@@ -58,9 +59,12 @@ class Scope:
         resolved = path.resolve(strict=False)
         return self._inside(resolved, self.home.resolve())
 
-    def resolve_ref(self, ref: str) -> Path:
-        """Turn what a resident typed into a path, then check it is readable."""
+    def resolve_ref(self, ref: str, *, folder: bool = False) -> Path:
+        """Turn what a resident typed into a path, then check it is readable. ``folder``: a folder is
+        fine too (read_note lists it)."""
         ref = ref.strip().strip("`\"'")
+        if ref.rstrip("/") in ("commons", "rounds", "offices", "crew", "residents"):
+            ref = ref.rstrip("/") + "/"
         if not ref:
             raise BatonError("Give a note path, for example knowledge/topic.md or commons/knowledge/topic.md")
         if ref.startswith("[[") and ref.endswith("]]"):
@@ -80,8 +84,11 @@ class Scope:
             path = path.with_suffix(".md")
         if not self.can_read(path):
             raise BatonError(f"Blocked: '{ref}' is outside what you can read (the commons, your own files, and letters to you). If you need something from another resident, send_letter to them and ask.")
+        if folder and path.is_dir():
+            return path
         if not path.is_file():
-            raise BatonError(f"No note at '{ref}'. Use search_memory to find the right path.")
+            raise BatonError(f"No note at '{ref}'. Use search_memory to find the right path, or read_note a folder "
+                             "(rounds/, offices/, commons/knowledge/) to see what's in it.")
         return path
 
     def _linked(self, link: str) -> Path:
