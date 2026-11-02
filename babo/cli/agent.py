@@ -238,7 +238,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     return
                 text = reasoning_buffer.add(content)
                 if text:
-                    cli_terminal._print_cli_reasoning(text, _thinking, renderer)
+                    cli_terminal._print_cli_reasoning(text, _thinking, renderer, reasoning_buffer)
                 return
             if ch and tool_hint and not ch.send_tool_hints:
                 return
