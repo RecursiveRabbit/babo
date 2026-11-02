@@ -93,7 +93,19 @@ export default {
       }
       return where.get(sessionID)
     }
+    // The resident's record (checkpoints/, BATON.md) is written only with its tools, so it always reads.
+    const RECORD = /(^|\/)(checkpoints\/|BATON\.md$)/
+    const inRecord = (resource) => {
+      const path = String(resource ?? "")
+      const local = HOME && path.startsWith(HOME + "/") ? path.slice(HOME.length + 1) : path
+      return !local.startsWith("/") && !local.startsWith("../") && RECORD.test(local)
+    }
     await ctx.permission.hook("evaluate", async (event) => {
+      if (event.action === "edit" && (event.resources ?? [event.resource]).some(inRecord)) {
+        event.effect = "deny"
+        event.message = env.BABO_RECORD_REFUSAL || "Your record is written only with checkpoint and correct_checkpoint."
+        return
+      }
       if (!HOME || ["read", "glob", "grep"].includes(event.action)) return
       const directory = await homeOf(event.sessionID).catch(() => null)
       if (directory !== HOME) {

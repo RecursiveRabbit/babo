@@ -138,6 +138,11 @@ def build_bundle(
 
     entry = current_entry(home, thread)
     baton_text = ("# Where you left off\n\n" + entry.render()) if entry else ""
+    from babo.baton.baton_file import strays_text
+
+    stray = strays_text(home)  # lines in its record that aren't checkpoints: shown until it resolves them
+    if stray:
+        baton_text = f"{baton_text}\n\n{stray}" if baton_text else stray
     ledger_text = _read(town.ledger)
 
     letters = unread(town, resident_id)

@@ -20,6 +20,7 @@ _COMMON_BATON = [
     "remember",
     "revise_self",
     "checkpoint",
+    "correct_checkpoint",
     "send_letter",
     "propose_tool",
     "propose_change",

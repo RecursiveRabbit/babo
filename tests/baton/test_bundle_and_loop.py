@@ -92,7 +92,8 @@ def test_resident_loop_uses_baton_context_and_pruned_tools(make_loop, town: Town
     assert "subagent" in names  # the Mayor spawns crew
     assert "send_errand" in names  # how the Mayor gets things done on the box
     assert "update_tasks" in names  # the town's longest work keeps a task list (step 19)
-    assert len(names) <= 16  # small models choose worse from many tools: keep the Mayor's list short
+    assert "correct_checkpoint" in names  # the only way to correct the record (or resolve a stray line in it)
+    assert len(names) <= 17  # small models choose worse from many tools: keep the Mayor's list short
     prompt = loop.context.build_system_prompt(channel="cli")
     assert "# Self" in prompt and "Role: Mayor" in prompt
     for upstream_only in ("SOUL.md", "USER.md", "MEMORY.md", "Dream"):
