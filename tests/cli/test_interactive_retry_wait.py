@@ -52,7 +52,7 @@ async def test_reasoning_display_is_independent_of_send_progress(send_progress):
         metadata={},
     )
 
-    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None, b=None: calls.append(t)):
         handled = await terminal._maybe_print_interactive_progress(msg, None, channels_config)
 
     assert handled is True
@@ -72,7 +72,7 @@ async def test_reasoning_delta_displayed_when_show_reasoning_enabled():
         metadata={},
     )
 
-    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None, b=None: calls.append(t)):
         handled = await terminal._maybe_print_interactive_progress(msg, None, channels_config)
 
     assert handled is True
@@ -87,7 +87,7 @@ async def test_reasoning_delta_buffers_until_sentence_boundary():
     )
     reasoning_buffer = terminal._ReasoningBuffer()
 
-    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None, b=None: calls.append(t)):
         first = await terminal._maybe_print_interactive_progress(
             SimpleNamespace(
                 content="The",
@@ -122,7 +122,7 @@ async def test_reasoning_end_flushes_buffered_delta():
     )
     reasoning_buffer = terminal._ReasoningBuffer()
 
-    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+    with patch("babo.cli.terminal._print_cli_reasoning", side_effect=lambda t, th, r=None, b=None: calls.append(t)):
         delta = await terminal._maybe_print_interactive_progress(
             SimpleNamespace(
                 content="The user asked",

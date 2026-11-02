@@ -139,24 +139,28 @@ def parse_calls(text: str, tools: dict[str, dict[str, Any]]) -> tuple[str, list[
     return rest.strip(), calls
 
 
-def separate_thinking(completion: dict[str, Any], *, opens: bool = False) -> bool:
+def separate_thinking(completion: dict[str, Any], *, opens: bool = False) -> tuple[bool, bool]:
     """Thinking inside a finished completion's text moved to ``reasoning_content``, in place (see
-    ``babo.providers.thinking``). Returns whether the reply showed its template opens thinking."""
+    ``babo.providers.thinking``). Returns whether the reply showed its template opens thinking, and
+    whether it showed that guess was wrong (no closing tag, or thinking in its own field)."""
     from babo.providers.thinking import split_thinking
 
     orphan = False
+    wrong = False
     for choice in cast(list[dict[str, Any]], completion.get("choices") or []):
         message = cast(dict[str, Any], choice.get("message") or {})
         content = message.get("content")
         if not isinstance(content, str) or not content:
             continue
+        if opens and (message.get("reasoning_content") or "</" not in content):
+            wrong = True
         thought, answer, found = split_thinking(content, opens_thinking=opens and not message.get("reasoning_content"))
         orphan = orphan or found
         if thought is not None:
             earlier = message.get("reasoning_content")
             message["reasoning_content"] = f"{earlier}\n\n{thought}" if isinstance(earlier, str) and earlier else thought
             message["content"] = answer or None
-    return orphan
+    return orphan, wrong
 
 
 def repair_completion(completion: dict[str, Any], tools: dict[str, dict[str, Any]]) -> int:
@@ -207,6 +211,11 @@ class StreamRepair:
     def orphan(self) -> bool:
         """This reply showed its model's template opens thinking (remember it)."""
         return bool(self._thinking.orphan)
+
+    @property
+    def unconfirmed(self) -> bool:
+        """This reply showed the guess that its template opens thinking was wrong (forget it)."""
+        return bool(self._thinking.unconfirmed)
 
     def _content(self, parts: list[tuple[str, str]]) -> list[bytes]:
         """The reply's text, split: thinking goes on as ``reasoning_content``, the answer as content."""
@@ -283,9 +292,11 @@ class StreamRepair:
         content = delta.get("content")
         others = {k: v for k, v in delta.items() if k != "content"}
         if others and any(v not in (None, "") for v in others.values()):
+            held: list[tuple[str, str]] = []
             if others.get("reasoning_content") or others.get("reasoning"):
-                self._thinking.native()  # thinking comes in its own field: the text is all answer
+                held = self._thinking.native()  # thinking comes in its own field: the text is all answer
             out.append(self._event(others))
+            out += self._content(held)
         if isinstance(content, str) and content:
             out += self._content(self._thinking.feed(content))
         if choice.get("finish_reason") is not None:

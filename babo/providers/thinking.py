@@ -52,22 +52,37 @@ class ThinkingSplitter:
     """Route a streamed reply's text into thinking and answer, as it arrives.
 
     ``opens_thinking``: the model's template opens thinking itself (learned, see
-    :func:`opens_thinking`). ``orphan`` is set when a reply turns out to have done that
-    without it being known; the caller remembers it for next time.
+    :func:`opens_thinking`). That is a guess, never a decision: the text is held until a
+    closing tag confirms it was thinking; if the thinking comes in its own field, or the
+    reply ends with no closing tag, what was held is the answer, and ``unconfirmed`` is set
+    (the caller forgets the guess). ``orphan`` is set when a reply turns out to have opened
+    thinking without it being known; the caller remembers it for next time.
     """
 
     def __init__(self, *, opens_thinking: bool = False) -> None:
-        self._state: Literal["start", "thinking", "answer"] = "thinking" if opens_thinking else "start"
+        self._state: Literal["start", "tentative", "thinking", "answer"] = "tentative" if opens_thinking else "start"
         self._buf: str = ""
+        self._held: str = ""  # tentative: text held until a closing tag says it was thinking
         self._opened: bool = opens_thinking
         self._answer_started: bool = False
         self.orphan: bool = False
+        self.unconfirmed: bool = False
         self.saw_thinking: bool = False
 
     def feed(self, text: str) -> list[Part]:
         self._buf += text
         out: list[Part] = []
         while self._buf:
+            if self._state == "tentative":
+                m = _CLOSE.search(self._buf)
+                if m:  # confirmed: what was held was thinking
+                    self._emit(out, "thinking", self._held + self._buf[:m.start()])
+                    self._held, self._buf, self._state = "", self._buf[m.end():].lstrip(), "answer"
+                    continue
+                keep = _partial_suffix(self._buf, _CLOSERS)
+                self._held += self._buf[:len(self._buf) - keep]
+                self._buf = self._buf[len(self._buf) - keep:]
+                return out
             if self._state == "start":
                 stripped = self._buf.lstrip()
                 if not stripped:
@@ -112,16 +127,27 @@ class ThinkingSplitter:
             return out
         return out
 
-    def native(self) -> None:
-        """Thinking is arriving in its own field: the reply's text is all answer."""
-        if self._state != "answer" and not self.saw_thinking:
+    def native(self) -> list[Part]:
+        """Thinking is arriving in its own field: the reply's text is all answer (and anything held is)."""
+        out: list[Part] = []
+        if self._state == "tentative":
+            self.unconfirmed = True
+            held, self._held = self._held, ""
+            self._state = "answer"
+            self._emit(out, "answer", held)
+        elif self._state != "answer" and not self.saw_thinking:
             self._state, self._opened = "answer", True
+        return out
 
     def finish(self) -> list[Part]:
         """The rest, once the reply is complete (an unfinished tag is just text)."""
         rest: str = self._buf
         self._buf = ""
         out: list[Part] = []
+        if self._state == "tentative":  # no closing tag came: it was the answer all along
+            self.unconfirmed = True
+            rest, self._held = self._held + rest, ""
+            self._state = "answer"
         if self._state == "thinking":
             self._emit(out, "thinking", rest)
         elif rest.strip() or self._state == "answer":

@@ -174,3 +174,17 @@ async def test_the_gateway_gives_residents_thinking_as_thinking(tmp_path: Path, 
             assert _reasoning_and_content(streamed.content) == ("Who asks?", "The archivist.")
     finally:
         await runner.cleanup()
+
+
+def test_the_gateway_never_turns_a_whole_answer_into_thinking_on_a_wrong_guess() -> None:
+    repair = StreamRepair({}, opens_thinking=True)
+    raw = b"".join(out for chunk in _stream({"content": "White "}, {"content": "is on top."}) for out in repair.feed(chunk)) + b"".join(repair.close())
+    assert _reasoning_and_content(raw) == ("", "White is on top.") and repair.unconfirmed
+    repair = StreamRepair({}, opens_thinking=True)
+    raw = b"".join(out for chunk in _stream({"reasoning_content": "Hmm."}, {"content": "Yes."}) for out in repair.feed(chunk))
+    assert _reasoning_and_content(raw) == ("Hmm.", "Yes.")
+    from babo.baton.toolcall_repair import separate_thinking
+
+    completion = {"choices": [{"message": {"role": "assistant", "content": "White is on top."}}]}
+    assert separate_thinking(completion, opens=True) == (False, True)
+    assert completion["choices"][0]["message"]["content"] == "White is on top."

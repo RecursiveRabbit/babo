@@ -292,6 +292,7 @@ def _print_cli_progress_line(
 class _ReasoningBuffer:
     def __init__(self) -> None:
         self._text = ""
+        self.opened = False  # a [thinking] block is open: its pieces print inside it, the footer at its end
 
     def add(self, text: str) -> str | None:
         if not text:
@@ -308,6 +309,7 @@ class _ReasoningBuffer:
 
     def clear(self) -> None:
         self._text = ""
+        self.opened = False
 
     def _should_flush(self, text: str) -> bool:
         stripped = text.rstrip()
@@ -318,12 +320,21 @@ class _ReasoningBuffer:
         )
 
 
+_THINKING_OPEN = "[thinking]"
+_THINKING_CLOSE = "[/thinking]"
+
+
 def _print_cli_reasoning(
     text: str,
     thinking: ThinkingSpinner | None,
     renderer: StreamRenderer | None = None,
+    buffer: _ReasoningBuffer | None = None,
 ) -> None:
-    """Print reasoning/thinking content in a distinct style."""
+    """Print reasoning/thinking content in a distinct style, inside one labelled block.
+
+    With ``buffer`` (thinking that streams in pieces), the label opens with the first piece
+    and closes at the end of the thinking (:func:`_flush_cli_reasoning`); without it, the
+    piece is a whole block of its own."""
     if not text.strip():
         return
     target = renderer.console if renderer else console
@@ -332,9 +343,13 @@ def _print_cli_reasoning(
         if renderer:
             renderer.ensure_header()
         # Labelled, and set apart from the answer; Text keeps brackets in the thinking from being read as markup.
-        target.print(Text("[thinking]", style="bold magenta dim"))
+        if buffer is None or not buffer.opened:
+            target.print(Text(_THINKING_OPEN, style="bold magenta dim"))
+            if buffer is not None:
+                buffer.opened = True
         target.print(Text(text.strip(), style="dim italic"))
-        target.print(Text("[/thinking]", style="bold magenta dim"))
+        if buffer is None:
+            target.print(Text(_THINKING_CLOSE, style="bold magenta dim"))
 
 
 def _flush_cli_reasoning(
@@ -342,9 +357,16 @@ def _flush_cli_reasoning(
     thinking: ThinkingSpinner | None,
     renderer: StreamRenderer | None = None,
 ) -> None:
+    """The end of the thinking: what's left of it, then the closing label."""
     text = reasoning_buffer.flush()
     if text:
-        _print_cli_reasoning(text, thinking, renderer)
+        _print_cli_reasoning(text, thinking, renderer, reasoning_buffer)
+    if reasoning_buffer.opened:
+        reasoning_buffer.opened = False
+        target = renderer.console if renderer else console
+        pause = renderer.pause_spinner() if renderer else (thinking.pause() if thinking else nullcontext())
+        with pause:
+            target.print(Text(_THINKING_CLOSE, style="bold magenta dim"))
 
 
 async def _print_interactive_progress_line(
@@ -399,7 +421,7 @@ async def _maybe_print_interactive_progress(
             return True
         text = reasoning_buffer.add(msg.content)
         if text:
-            _print_cli_reasoning(text, thinking, renderer)
+            _print_cli_reasoning(text, thinking, renderer, reasoning_buffer)
         return True
     if channels_config and is_tool_hint and not channels_config.send_tool_hints:
         return True
