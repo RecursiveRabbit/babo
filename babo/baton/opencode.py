@@ -543,6 +543,7 @@ def _memory_env(town: Town, config: Config, session: Session, *, config_path: Pa
     return {
         "BABO_BIN": babo, "BABO_CONFIG": str(config_path), "BABO_RESIDENT": session.resident, "BABO_SESSION": session.id,
         "BABO_TASKS": str(_tasks_reminder(town, session)),
+        "BABO_RECORD_REFUSAL": _record_refusal(),
         "BABO_HOME": str(town.resident_dir(session.resident)),
         "BABO_SPOOL": str(spool_path(town, session)),
         "BABO_NOW": str(now_path(town, session)),
@@ -586,6 +587,12 @@ def write_bundle(town: Town, config: Config, session: Session) -> Path:
 
     atomic_write(guides_path(town, session), guides.plugin_file(town, Registry(town).require_active(session.resident).office))
     return path
+
+
+def _record_refusal() -> str:
+    from babo.baton.baton_file import RECORD_REFUSAL
+
+    return RECORD_REFUSAL
 
 
 def _tasks_reminder(town: Town, session: Session) -> Path:

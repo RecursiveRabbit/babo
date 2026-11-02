@@ -796,3 +796,25 @@ def test_a_residents_task_list_is_its_sessions_and_comes_back_with_its_next_mess
         assert "[Your task list, from Babo" in _texts({"messages": [last_user]}) and "Write the index" in _texts({"messages": [last_user]})
     finally:
         opencode.freeze(town, session)
+
+
+@live
+def test_a_residents_record_is_written_only_with_its_tools(town: Town, config_file, mock_llama: MockLlama) -> None:
+    from babo.baton.baton_file import RECORD_REFUSAL
+
+    path, cfg = config_file()
+    views.update_profile(town, cfg.baton, "archivist", {"files": "allow"}, [])
+    home = town.resident_dir("archivist")
+    record = home / "checkpoints" / "2026-11-02.jsonl"
+    mock_llama.script = [tool_call("write", {"path": str(record), "content": '"a note"\n'}),
+                         tool_call("write", {"path": str(home / "BATON.md"), "content": "mine"}),
+                         tool_call("write", {"path": str(home / "notes.md"), "content": "fine"}), text("Tried.")]
+    session = opencode.new_session(town, cfg, "archivist", title="record")
+    try:
+        assert opencode.send(town, cfg, session, "Write those.", config_path=path) == "Tried."
+        assert not record.exists() and (home / "notes.md").read_text() == "fine"
+        assert not (home / "BATON.md").exists() or (home / "BATON.md").read_text() != "mine"
+        results = [str(m["content"]) for m in mock_llama.requests[-1]["messages"] if m["role"] == "tool"]
+        assert sum(RECORD_REFUSAL in r for r in results) == 2, results  # both refused, saying what to use
+    finally:
+        opencode.freeze(town, session)

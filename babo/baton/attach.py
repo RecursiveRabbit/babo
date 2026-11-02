@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -151,6 +151,12 @@ def attach(loop: AgentLoop, config: Config) -> ResidentRuntime | None:
                 limit=baton_cfg.memory.commit_gate_after_tool_calls, counters=formation.counters,
             )
     loop._hook_factories.append(formation.hook_factory)  # pyright: ignore[reportPrivateUsage]
+    # The record (checkpoints/, BATON.md) is written only with checkpoint and correct_checkpoint: a file
+    # tool aimed at it is refused, saying what to use instead (see babo.baton.baton_file).
+    for name in ("write_file", "edit_file"):
+        tool = loop.tools.get(name)
+        if tool is not None:
+            _gate_record(tool, town.resident_dir(resident_id))
     # Guides, brought in with a tool's result when they're needed, and a reminder when it goes round in
     # circles (for tools registered later too).
     from babo.baton import drift, guides
@@ -248,3 +254,23 @@ def make_visit(config: Config, town: Town, visitor: str):
         return f"{target.display} replied:\n{content}"
 
     return visit
+
+
+def _gate_record(tool: object, home: Path) -> None:
+    from babo.agent.tools.base import ToolResult
+    from babo.baton.baton_file import RECORD_REFUSAL, is_record_path
+
+    inner = cast(Any, tool).execute
+
+    async def execute(**kwargs: Any) -> Any:
+        path = kwargs.get("path")
+        if isinstance(path, str) and path.strip():
+            try:
+                target: object = cast(Any, tool)._resolve_write(path)  # the tool's own reading of the path
+            except Exception:  # (out of reach anyway: the tool says so itself)
+                target = None
+            if isinstance(target, Path | str) and is_record_path(home, Path(target)):
+                return ToolResult.error(f"Error: {RECORD_REFUSAL}")
+        return await inner(**kwargs)
+
+    object.__setattr__(tool, "execute", execute)

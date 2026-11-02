@@ -51,3 +51,69 @@ def test_the_doctor_says_where_they_are(town: Town, make_config) -> None:
     record.write_text('"stray"\n')
     check = check_memory_files(cfg)
     assert check.status == "WARN" and "residents/archivist/checkpoints/2026-11-01.jsonl line 1" in check.detail
+
+
+def _stray(town: Town, resident: str = "mayor", text: str = "remember the board is open on Mondays") -> str:
+    home = town.resident_dir(resident)
+    append_checkpoint(home, Checkpoint(thread="the board", doing="reading posts", resident=resident))
+    record = next((home / "checkpoints").glob("*.jsonl"))
+    with record.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(text) + "\n")
+    return f"checkpoints/{record.name}:2"
+
+
+def test_a_stray_line_is_shown_to_its_resident_word_for_word_until_it_says_what_it_was(town: Town, box) -> None:
+    from babo.baton.bundle import build_bundle
+    from babo.baton.registry import Registry
+
+    Registry(town).update("mayor", first_session_done=True)
+    ref = _stray(town)
+    now = build_bundle(town, "mayor").now_text()
+    assert "Also in your record, not written as checkpoints" in now and f'`{ref}`: "remember the board is open on Mondays"' in now
+    said = box("mayor").call("correct_checkpoint", entry=ref, thread="the board", doing="checking the board on Mondays")
+    assert ref in said and "is now a checkpoint" in said
+    assert "Also in your record" not in build_bundle(town, "mayor").now_text()  # resolved
+    record = next((town.resident_dir("mayor") / "checkpoints").glob("*.jsonl"))
+    assert '"remember the board is open on Mondays"' in record.read_text()  # never rewritten
+    latest = current_entry(town.resident_dir("mayor"))
+    assert latest is not None and latest.doing == "checking the board on Mondays" and latest.corrects == ref
+
+
+def test_a_stray_line_can_be_kept_as_a_note(town: Town, box) -> None:
+    from babo.baton.inbox import items
+
+    ref = _stray(town)
+    assert "Kept as a note" in box("mayor").call("correct_checkpoint", entry=ref, keep_as_note=True)
+    assert any(i.kind == "remember" and "Mondays" in i.body for i in items(town, "mayor"))
+    from babo.baton.baton_file import strays
+
+    assert strays(town.resident_dir("mayor")) == []
+
+
+def test_an_entry_is_corrected_by_a_new_one_naming_it(town: Town, box) -> None:
+    import pytest
+
+    from babo.baton.town import BatonError
+
+    home = town.resident_dir("mayor")
+    append_checkpoint(home, Checkpoint(thread="the index", doing="listing notes", next=["write it"], resident="mayor",
+                                       at="2026-11-02T05:59:10"))
+    said = box("mayor").call("correct_checkpoint", entry="2026-11-02 05:59", doing="listing the commons notes")
+    assert "corrected" in said
+    latest = current_entry(home)
+    assert latest is not None and (latest.doing, latest.next, latest.thread) == ("listing the commons notes", ["write it"], "the index")
+    assert "correcting 2026-11-02T05:59:10" in latest.render() and len(iter_checkpoints(home)) == 2  # both kept
+    with pytest.raises(BatonError, match="Nothing in your record"):
+        box("mayor").call("correct_checkpoint", entry="2020-01-01 00:00", doing="x")
+
+
+async def test_the_mayors_file_tools_dont_write_his_record(make_loop, mock_llama, town: Town) -> None:
+    from baton.mock_llama import text, tool_call
+
+    home = town.resident_dir("mayor")
+    mock_llama.push(tool_call("write_file", {"path": "checkpoints/2026-11-02.jsonl", "content": '"x"\n'}),
+                    tool_call("write_file", {"path": "notes.md", "content": "fine"}), text("Done."))
+    await make_loop("mayor").process_direct("Write those.", session_key="cli:record")
+    assert not (home / "checkpoints" / "2026-11-02.jsonl").exists() and (home / "notes.md").read_text() == "fine"
+    first = [m for m in mock_llama.requests[1]["messages"] if m["role"] == "tool"][-1]["content"]
+    assert "correct_checkpoint" in first
