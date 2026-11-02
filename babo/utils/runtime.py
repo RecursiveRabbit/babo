@@ -33,6 +33,18 @@ BUDGET_EXHAUSTED_FINALIZATION_PROMPT = (
     "done, what remains, and the best next step if anything is incomplete."
 )
 
+LOOP_STOPPED_FINALIZATION_PROMPT = (
+    "You've been going round in circles: the same step keeps meeting the same answer. Tools are done for "
+    "this turn. Based only on the conversation above, tell the user plainly what you were trying to do, "
+    "what is in the way, and what you'd need (a tool, access, or their help) to go on. Do not call or "
+    "request tools."
+)
+
+LOOP_STOPPED_MESSAGE = (
+    "I kept running into the same wall, so I stopped trying. Tell me what you'd like me to do instead, "
+    "or give me what I need to get past it."
+)
+
 LENGTH_RECOVERY_PROMPT = (
     "The previous assistant response was cut off. Continue the same response from its "
     "exact endpoint. Output only new continuation text in the same language and style. "
@@ -70,9 +82,9 @@ def build_finalization_retry_message() -> dict[str, str]:
     return {"role": "user", "content": FINALIZATION_RETRY_PROMPT}
 
 
-def build_budget_exhausted_finalization_message() -> dict[str, str]:
-    """Prompt the model for a no-tools final response after budget exhaustion."""
-    return {"role": "user", "content": BUDGET_EXHAUSTED_FINALIZATION_PROMPT}
+def build_budget_exhausted_finalization_message(*, loop_stopped: bool = False) -> dict[str, str]:
+    """Prompt the model for a no-tools final response after budget exhaustion (or a loop the harness stopped)."""
+    return {"role": "user", "content": LOOP_STOPPED_FINALIZATION_PROMPT if loop_stopped else BUDGET_EXHAUSTED_FINALIZATION_PROMPT}
 
 
 def build_length_recovery_message(content: str) -> dict[str, str]:

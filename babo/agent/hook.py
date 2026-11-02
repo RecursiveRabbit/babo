@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -328,3 +329,41 @@ class SDKCaptureHook(AgentHook):
         self.error = context.error
         self.tool_events = list(context.tool_events)
         self.had_injections = context.had_injections
+
+
+# -- ending a turn's tool calls early -------------------------------------------------------
+# Something watching a turn (Babo's loop detector) can ask the runner to stop calling tools: the
+# turn then ends the way it does at its iteration limit, with one last request without tools, so
+# the agent says in words where it stands instead of trying again.
+
+_TURN: ContextVar[dict[str, Any] | None] = ContextVar("babo_turn_watch", default=None)
+
+
+def begin_turn_watch() -> Token[dict[str, Any] | None]:
+    return _TURN.set({"end": [], "counts": {}})
+
+
+def end_turn_watch(token: Token[dict[str, Any] | None]) -> None:
+    _TURN.reset(token)
+
+
+def count_in_turn(name: str) -> int:
+    """Count something that happened in the running turn (0 outside one)."""
+    turn = _TURN.get()
+    if turn is None:
+        return 0
+    counts: dict[str, int] = turn["counts"]
+    counts[name] = counts.get(name, 0) + 1
+    return counts[name]
+
+
+def request_end_of_tools(reason: str) -> None:
+    """Ask the running turn to stop calling tools and answer in words."""
+    turn = _TURN.get()
+    if turn is not None:
+        turn["end"].append(reason)
+
+
+def end_of_tools_requested() -> str | None:
+    turn = _TURN.get()
+    return turn["end"][0] if turn and turn["end"] else None

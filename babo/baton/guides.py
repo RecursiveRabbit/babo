@@ -262,11 +262,16 @@ def install(tool: Any, *, town: Town, resident_id: str, office: str, shown: Show
             out.append(guide.text())
         tripped = watch.see(session, name, args, failed=failed, result=result) if watch is not None else None
         if tripped is not None:
+            from babo.agent.hook import count_in_turn, request_end_of_tools
+
             rule, times = tripped
             append_event(town, resident_id, key, drift.EVENT, rule=rule, tool=name, times=times)
             out.append(drift.reminder(rule, name))
             if times == 2:
                 drift.tell_owner(town, resident_id, session, "", rule, name)
+            if count_in_turn("drift") >= drift.STOP_AFTER:  # still going round: tools end for this turn
+                append_event(town, resident_id, key, drift.EVENT, rule="stopped", tool=name, times=times)
+                request_end_of_tools(f"{rule} on {name}")
         return out
 
     async def execute(**kwargs: Any) -> Any:

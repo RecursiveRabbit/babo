@@ -19,6 +19,7 @@ from typing import Any, cast
 
 EVENT = "drift"
 REPEATS = 3  # the same call this many times ...
+STOP_AFTER = 3  # times a turn trips a rule before Babo ends its tool calls (it answers in words instead)
 WINDOW = 6  # ... among the last this many calls
 REFUSED = ("permission denied", "permission.rejected", "blocked", "not allowed", "is not available")
 
