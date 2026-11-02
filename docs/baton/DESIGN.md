@@ -13,7 +13,7 @@ The town is a metaphor taken seriously, because we respect the entities in it. R
 These are the rules every change is checked against.
 
 1. **The owner is in charge.** Nothing that runs on the machine, widens an agent's access, or founds a resident happens without the owner's approval, unless the owner chose to allow it (and that choice is visible and recorded).
-2. **Memory belongs to the agent.** The harness decides *when* a resident writes its memory; the resident decides *what* it says. Nothing summarizes a mind behind its back, and no compaction loses data.
+2. **Memory belongs to the agent.** The harness decides *when* a resident writes its memory; the resident decides *what* it says. Nothing summarizes a mind behind its back, and no compaction loses data. The content is the resident's and the format is Babo's: the record is written only with the resident's tools (`checkpoint`, `correct_checkpoint`), by agents and owner alike, corrections are new entries rather than rewrites, and anything else found in it is shown back to its resident, never dropped or changed.
 3. **Residents grow.** They keep their sessions, lessons, letters and their own `SELF.md`; their work gets better with use. They get time of their own, not only tasks.
 4. **Parity.** A session is a session. The Mayor's chats and residents' sessions offer the same actions and options, in the web interface, in opencode and in the terminal. Where something can't exist for one side, it gets the nearest honest equivalent, and the terminal can do everything the web interface can.
 5. **Provider-agnostic.** Any model the owner configures and enables (a local llama, Ollama, OpenAI, Anthropic, anything) can be the default, or be chosen per agent or per session. Model names, keys and machines live in the owner's config, never in the code.
@@ -169,7 +169,7 @@ A session's *visibility* is chosen when it starts, like its other settings. **Pr
 ## Glossary
 
 - **Baton**: a resident's running memory; at each checkpoint it writes where it is and what it learned, and the next session picks it up.
-- **Checkpoint**: one entry in the baton, written by the resident in its own words.
+- **Checkpoint**: one entry in the baton, written by the resident in its own words (with `checkpoint`; corrected, never rewritten, with `correct_checkpoint`).
 - **Commons**: what the town shares: knowledge notes, skills, tools, proposals, projects, the board.
 - **Office**: a job the town has, as a template (`offices/<name>.md`): its role, the profile a newcomer in it starts with, and the rounds it joins. The Mayor's office is the town's main agent, and isn't a template.
 - **Moved away**: a resident who has left; its folder and memory stay, and its office is a vacancy again.

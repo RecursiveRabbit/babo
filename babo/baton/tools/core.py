@@ -81,6 +81,18 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             {"type": "object", "properties": {"text": _str("What to remember.")}, "required": ["text"]},
         ),
         ToolSpec(
+            "correct_checkpoint",
+            "Correct an entry in your record (or say what a line Babo shows you from it was meant to be). Nothing is "
+            "rewritten: the correction is a new entry naming the old one. Give the entry as your baton shows its time, "
+            "and the checkpoint as it should be (what you leave out is kept); or keep_as_note for a line.",
+            {"type": "object", "properties": {
+                "entry": _str("The entry's time (2026-11-02 05:59), or the line as shown (checkpoints/2026-11-02.jsonl:3)."),
+                "thread": _str("Optional."), "doing": _str("Optional: what you were doing."),
+                "done": _list("Optional."), "learned": _list("Optional."), "next": _list("Optional."), "blockers": _list("Optional."),
+                "keep_as_note": {"type": "boolean", "description": "For a line: keep its words as a note to yourself instead."}},
+             "required": ["entry"]},
+        ),
+        ToolSpec(
             "update_tasks",
             "Keep a task list for work with several steps: give the whole list each time, each item with its status "
             "(todo, doing, done, dropped). Babo shows it back to you as you go.",
@@ -361,6 +373,20 @@ class Toolbox:
         if target.parent == (self.home / "inbox").resolve() or target.parent == self.home / "inbox":
             set_flag(target, read=True)
         return trim_to_tokens(text, READ_NOTE_MAX_TOKENS, "\n[…the note continues; ask for a section if you need more]")
+
+    def correct_checkpoint(self, entry: str, keep_as_note: bool = False, **fields: Any) -> str:
+        from babo.agent.tools.context import current_request_session_key
+        from babo.baton import baton_file
+
+        home = self.home
+        try:
+            if keep_as_note:
+                text = baton_file.keep_as_note(home, entry)
+                deliver(self.town, self.resident_id, kind="remember", sender=self.resident_id, text=text)
+                return "Kept as a note to yourself (it goes into your memory at your next review); the line stays in the record, resolved."
+            return baton_file.correct(home, self.resident_id, entry, fields, session=self.session or current_request_session_key() or "")
+        except ValueError as exc:
+            raise BatonError(str(exc)) from exc
 
     def update_tasks(self, items: object) -> str:
         from babo.agent.tools.context import current_request_session_key
