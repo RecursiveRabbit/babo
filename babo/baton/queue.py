@@ -242,8 +242,11 @@ class ModelQueue:
                 completion = cast(dict[str, Any], json.loads(raw))
             except ValueError:
                 return web.Response(body=raw, status=upstream.status, content_type=upstream.content_type)
-            if separate_thinking(completion, opens=opens) and not opens:
+            orphan, wrong = separate_thinking(completion, opens=opens)
+            if orphan and not opens:
                 thinking.remember_opens_thinking(base, model)
+            elif wrong:
+                thinking.forget_opens_thinking(base, model)
             self._count(repair_completion(completion, tools), resident)
             return web.json_response(completion)
         response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
@@ -254,6 +257,8 @@ class ModelQueue:
         await response.write_eof()
         if repair.orphan and not opens:
             thinking.remember_opens_thinking(base, model)
+        elif repair.unconfirmed:
+            thinking.forget_opens_thinking(base, model)
         self._count(repair.repaired, resident)
         return response
 

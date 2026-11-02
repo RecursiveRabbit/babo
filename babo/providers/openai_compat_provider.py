@@ -1942,7 +1942,7 @@ class OpenAICompatProvider(LLMProvider):
                         # content array rather than a separate field.
                         r_text = self._extract_thinking_content(raw_delta_content)
                     if r_text:
-                        splitter.native()
+                        await route(splitter.native())
                         if on_thinking_delta:
                             await on_thinking_delta(r_text)
                     if on_content_delta or on_thinking_delta:
@@ -1978,6 +1978,8 @@ class OpenAICompatProvider(LLMProvider):
             if not completed:
                 raise ConnectionError("Model stream ended before a finish reason was received")
             await route(splitter.finish())
+            if splitter.unconfirmed:  # the guess that its replies start in thinking was wrong this time
+                forget_opens_thinking(self.api_base, model or self.default_model)
             return self._separate_thinking(self._parse_chunks(chunks), model, orphan=splitter.orphan)
         except asyncio.TimeoutError:
             return LLMResponse(
@@ -2000,6 +2002,9 @@ class OpenAICompatProvider(LLMProvider):
         if response.reasoning_content and opens_thinking(self.api_base, name):
             forget_opens_thinking(self.api_base, name)  # its thinking comes in its own field now
         known = opens_thinking(self.api_base, name)
+        if known and not response.reasoning_content and "</" not in response.content:
+            forget_opens_thinking(self.api_base, name)  # no closing tag: the guess was wrong this time
+            known = False
         thinking, answer, found_orphan = split_thinking(response.content, opens_thinking=known and not response.reasoning_content)
         if (orphan or found_orphan) and not known:
             remember_opens_thinking(self.api_base, name)

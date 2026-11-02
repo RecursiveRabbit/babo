@@ -129,3 +129,19 @@ async def test_a_whole_reply_with_inline_thinking_is_split_too() -> None:
         client.return_value.chat.completions.create = AsyncMock(return_value=completion)
         result = await _provider().chat(messages=[{"role": "user", "content": "hi"}], model=MODEL)
     assert result.content == "Yes." and result.reasoning_content == "Hmm."
+
+
+def test_a_learned_guess_never_swallows_an_answer_without_a_closing_tag() -> None:
+    s = ThinkingSplitter(opens_thinking=True)
+    parts = s.feed("Blue is ") + s.feed("on the back.") + s.finish()
+    assert parts == [("answer", "Blue is on the back.")] and s.unconfirmed
+    s = ThinkingSplitter(opens_thinking=True)
+    assert s.feed("The answer") == [] and s.native() == [("answer", "The answer")] and s.unconfirmed  # thinking came in its field
+
+
+async def test_a_short_reply_from_a_model_learned_to_open_thinking_is_still_answered() -> None:
+    """The server took the (empty) thinking off itself: the reply is the answer, and the guess is dropped."""
+    thinking.remember_opens_thinking(BASE, MODEL)
+    seen_thinking, seen_answer, result = await _run(AsyncMock(return_value=_stream("White ", "is on top.")))
+    assert seen_thinking == [] and "".join(seen_answer) == "White is on top."
+    assert result.content == "White is on top." and not thinking.opens_thinking(BASE, MODEL)  # type: ignore[attr-defined]
