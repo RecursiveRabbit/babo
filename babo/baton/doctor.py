@@ -162,6 +162,25 @@ def check_residents(cfg: Config) -> Check:
     return Check("residents present", "PASS", ", ".join(residents))
 
 
+def check_memory_files(cfg: Config) -> Check:
+    """Lines in a resident's checkpoint record that aren't checkpoints: skipped when read, listed here."""
+    from babo.baton.baton_file import unreadable_lines
+    from babo.baton.registry import Registry
+    from babo.baton.town import BatonError, Town
+
+    try:
+        town = Town.open(cfg.baton.town_path)
+        bad = [(path, number) for r in Registry(town).all() for path, number in unreadable_lines(town.resident_dir(r.id))]
+    except BatonError as exc:
+        return Check("memory files", "FAIL", str(exc))
+    if not bad:
+        return Check("memory files", "PASS", "every checkpoint record reads")
+    where = "; ".join(f"{path.relative_to(town.root)}" + (f" line {n}" if n else "") for path, n in bad[:5])
+    more = f" (and {len(bad) - 5} more)" if len(bad) > 5 else ""
+    return Check("memory files", "WARN", f"{len(bad)} line(s) aren't checkpoints and are skipped: {where}{more}. "
+                                         "Something other than Babo wrote them; remove them or leave them, nothing depends on them.")
+
+
 def check_backup() -> Check:
     from babo.baton.compaction import read_backup, write_backup
 
@@ -237,7 +256,7 @@ async def run_doctor(cfg: Config, *, config_path: Path | None = None, include_ti
         checks += [await check_tool_calling(cfg), await check_schema(cfg), await check_checkpoint_turn(cfg)]
     else:
         checks += [Check(n, "FAIL", "skipped: the model isn't reachable") for n in ("tool calling", "schema output", "checkpoint turn")]
-    checks += [await check_mcp(cfg, config_path), check_index(cfg), check_residents(cfg), check_backup()]
+    checks += [await check_mcp(cfg, config_path), check_index(cfg), check_residents(cfg), check_memory_files(cfg), check_backup()]
     if include_timer:
         checks.append(check_upkeep())
     checks.append(await asyncio.to_thread(check_opencode, cfg))

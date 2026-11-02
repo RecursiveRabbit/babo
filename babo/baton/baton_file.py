@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from loguru import logger
+
 from babo.baton.town import atomic_write, now_iso, today
 
 LIST_FIELDS = ("done", "learned", "next", "blockers")
@@ -85,17 +87,47 @@ class Checkpoint:
         return "\n".join(lines).rstrip() + "\n"
 
 
-def iter_checkpoints(resident_dir: Path) -> list[Checkpoint]:
-    out: list[Checkpoint] = []
+_reported: set[tuple[str, int]] = set()
+
+
+def _records(resident_dir: Path) -> list[tuple[Path, int, Checkpoint | None]]:
+    """Every line of the checkpoint record: the checkpoint, or None for a line that isn't one (a line
+    written by hand or by a tool, cut short, or not a record at all). Such a line is skipped, never fatal:
+    the baton is read for every prompt, so one bad line must not stop the agent (or the Town page)."""
+    out: list[tuple[Path, int, Checkpoint | None]] = []
     for path in sorted((resident_dir / "checkpoints").glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            out.append((path, 0, None))
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                out.append(Checkpoint.from_record(json.loads(line)))
+                record: object = json.loads(line)
+                checkpoint = Checkpoint.from_record(cast(dict[str, Any], record)) if isinstance(record, dict) else None
             except (ValueError, TypeError):
-                continue
+                checkpoint = None
+            out.append((path, number, checkpoint))
+    return out
+
+
+def unreadable_lines(resident_dir: Path) -> list[tuple[Path, int]]:
+    """The lines of the checkpoint record that aren't checkpoints (for ``babo doctor``)."""
+    return [(path, number) for path, number, checkpoint in _records(resident_dir) if checkpoint is None]
+
+
+def iter_checkpoints(resident_dir: Path) -> list[Checkpoint]:
+    out: list[Checkpoint] = []
+    for path, number, checkpoint in _records(resident_dir):
+        if checkpoint is None:
+            if (str(path), number) not in _reported:
+                _reported.add((str(path), number))
+                logger.warning("Babo: {} line {} isn't a checkpoint; skipped (babo doctor lists these)", path, number)
+            continue
+        out.append(checkpoint)
     out.sort(key=lambda c: c.at)
     return out
 
