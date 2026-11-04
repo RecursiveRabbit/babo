@@ -141,7 +141,7 @@ def test_project_promotion_moves_it_to_the_commons(box, town: Town) -> None:
 
 
 def test_founding_via_review_and_stale_flags(box, town: Town) -> None:
-    box("mayor").post_board("move_in_request", "Someone to look after the projects.", office="steward")
+    box("mayor").town_square(kind="move_in_request", text="Someone to look after the projects.", office="steward")
     request = next(town.board.glob("*move_in_request*"))
     new_id = growth.decide_founding(town, request, approve=True, reason="we need help")
     assert new_id == "steward" and Registry(town).get("steward") is not None
@@ -181,7 +181,7 @@ def test_review_walkthrough_with_plain_answers(cli_config: Path, town: Town, box
 
     _propose_shout(box, town)
     box("mayor").propose_change("Quiet hours", "Night is busy", "No visits after 22:00")
-    box("mayor").post_board("move_in_request", "A gardener.", office="gardener")
+    box("mayor").town_square(kind="move_in_request", text="A gardener.", office="gardener")
     answers = "\n".join(["a", "safe enough", "d", "maybe later", "s"]) + "\n"
     result = CliRunner().invoke(app, ["review", "-c", str(cli_config)], input=answers)
     assert result.exit_code == 0, result.output

@@ -585,3 +585,23 @@ def change_project_board(town: Town, change: dict[str, Any]) -> str:
                                    assignee=resident("assignee"))
         return f"Updated {t.ref}."
     raise BatonError("action is one of: new_project, update_project, new_ticket, update_ticket")
+
+
+def change_square(town: Town, change: dict[str, Any]) -> str:
+    """The owner on the town square (the Square tab, ``babo square``): post, reply or close, as the owner."""
+    from babo.baton import square
+
+    def text(key: str, limit: int = 4000) -> str:
+        value = change.get(key, "")
+        if not isinstance(value, str) or len(value) > limit:
+            raise BatonError(f"{key} is text, at most {limit} characters")
+        return value.strip()
+
+    action = text("action", 20)
+    if action == "post":
+        return f"Posted: {square.post(town, OWNER, text('kind', 20), text('title', 200), text('text')).id}."
+    if action == "reply":
+        return f"Replied on {square.reply(town, OWNER, text('thread', 120), text('text', 2000)).id}."
+    if action == "close":
+        return f"Closed {square.close(town, OWNER, text('thread', 120), text('text', 2000)).id}."
+    raise BatonError("action is one of: post, reply, close")

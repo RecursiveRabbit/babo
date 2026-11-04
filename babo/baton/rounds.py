@@ -15,7 +15,7 @@ going from house to house. Each is a readable file in the town
       - office: archivist
         or: mayor               # who does it while the office is vacant (optional)
         duty: Curate the notes waiting in the queue into the commons.
-        material: promotions    # what Babo gathers for it: promotions | inspection | tickets | previous | none
+        material: promotions    # what Babo gathers for it: promotions | inspection | tickets | square | previous | none
       - office: inspector
         duty: Review pending tools, open proposals and today's changes.
         material: inspection
@@ -49,7 +49,7 @@ from babo.baton.town import BatonError, Town, atomic_write, now_iso
 ROUNDS_DIR = "rounds"
 MARK = "[From Babo: a round]"
 EVENTS = {"checkpoint": "a checkpoint is filed", "session-wrapped-up": "a session wraps up", "proposal": "a proposal is filed"}
-MATERIALS = ("none", "previous", "promotions", "inspection", "tickets")
+MATERIALS = ("none", "previous", "promotions", "inspection", "tickets", "square")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
@@ -326,6 +326,12 @@ def waiting(town: Town, step: Step) -> str:
         resident = step.who(town)
         count = len(projects.open_tickets_for(town, resident)) if resident else 0
         return f"{count} open ticket(s)" if count else ""
+    if step.material == "square":
+        from babo.baton import square
+
+        resident = step.who(town)
+        count = len(square.new_for(town, resident)) if resident else 0
+        return f"{count} new thread(s) on the square" if count else ""
     return ""
 
 
@@ -498,6 +504,11 @@ async def run(ctx: Context, r: Round, *, trigger: str, session_key: str,
             from babo.baton import projects
 
             material = projects.tickets_material(ctx.town, resident)
+        elif step.material == "square":
+            from babo.baton import square
+
+            material = square.material(ctx.town, resident)
+            after = lambda who=resident: square.mark_seen(ctx.town, who)  # noqa: E731
         elif step.material == "previous":
             material = f"What the step before reported:\n\n{previous}" if previous else ""
         else:

@@ -30,8 +30,8 @@ from babo.baton.tokens import estimate_tokens, trim_to_tokens
 from babo.baton.town import Town
 
 # The sections that change during a session (they go last), and how that part starts.
-NOW_SECTIONS = ("baton", "letters", "search")
-NOW_HEAD = "[Where you are now: your baton, new letters and notes. From Babo, not from the person you're talking with.]"
+NOW_SECTIONS = ("baton", "letters", "square", "search")
+NOW_HEAD = "[Where you are now: your baton, new letters, the square and notes. From Babo, not from the person you're talking with.]"
 
 
 @dataclass
@@ -155,6 +155,10 @@ def build_bundle(
         if len(previews) > letter_preview_lines:
             letters_text += f"\n- … and {len(previews) - letter_preview_lines} more in `inbox/`"
 
+    from babo.baton import square
+
+    square_text = square.now_text(town, resident_id)
+
     hits: list[Hit] = []
     if search_hits and index_path is not None and entry is not None:
         query = " ".join([entry.thread, entry.doing, *entry.next])
@@ -165,13 +169,13 @@ def build_bundle(
     hits_text = _hits_text(hits)
 
     budget = max_tokens - sum(estimate_tokens(t) for _, t in fixed)
-    variable = [("baton", baton_text), ("ledger", ledger_text), ("letters", letters_text), ("search", hits_text)]
+    variable = [("baton", baton_text), ("ledger", ledger_text), ("letters", letters_text), ("square", square_text), ("search", hits_text)]
 
     def used() -> int:
         return sum(estimate_tokens(t) for _, t in variable)
 
-    # Trim order: search hits, letters, ledger, baton.
-    for name in ("search", "letters", "ledger", "baton"):
+    # Trim order: search hits, the square, letters, ledger, baton.
+    for name in ("search", "square", "letters", "ledger", "baton"):
         if used() <= budget:
             break
         idx = next(i for i, (n, _) in enumerate(variable) if n == name)

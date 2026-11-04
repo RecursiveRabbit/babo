@@ -87,7 +87,7 @@ def test_resident_loop_uses_baton_context_and_pruned_tools(make_loop, town: Town
     loop = make_loop("mayor")
     assert isinstance(loop.context, BatonContextBuilder)
     names = set(loop.tools.tool_names)
-    assert {"search_memory", "read_note", "remember", "revise_self", "send_letter", "post_board"} <= names
+    assert {"search_memory", "read_note", "remember", "revise_self", "send_letter", "town_square"} <= names
     assert "commons_write" not in names and "web_search" not in names and "cron" not in names
     assert "subagent" in names  # the Mayor spawns crew
     assert "send_errand" in names  # how the Mayor gets things done on the box
@@ -107,7 +107,7 @@ def test_resident_loop_uses_baton_context_and_pruned_tools(make_loop, town: Town
 
 def test_archivist_and_inspector_toolsets(make_loop) -> None:
     arch = set(make_loop("archivist").tools.tool_names)
-    assert {"commons_write", "commons_supersede", "commons_contest"} <= arch and "post_board" not in arch
+    assert {"commons_write", "commons_supersede", "commons_contest"} <= arch and "town_square" in arch and "send_errand" not in arch
     insp = set(make_loop("inspector").tools.tool_names)
     assert {"file_flag", "review_item"} <= insp and "commons_write" not in insp
 
@@ -207,7 +207,7 @@ async def test_mcp_server_lists_and_calls_office_tools(town: Town, box) -> None:
     server = build_server(box("mayor"))
     async with create_connected_server_and_client_session(server) as client:
         tools = {t.name for t in (await client.list_tools()).tools}
-        assert "post_board" in tools and "commons_write" not in tools
+        assert "town_square" in tools and "commons_write" not in tools
         result = await client.call_tool("send_letter", {"to": "archivist", "text": "hello"})
         assert "delivered" in result.content[0].text
         denied = await client.call_tool("commons_write", {"title": "t", "body": "b"})

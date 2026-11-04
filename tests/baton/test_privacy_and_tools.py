@@ -175,7 +175,7 @@ def test_office_tools_are_refused_to_others(box, resident: str, tool: str, kwarg
 
 
 def test_available_tools_per_office(box) -> None:
-    assert "post_board" in box("mayor").available()
+    assert "town_square" in box("mayor").available() and "town_square" in box("archivist").available()
     assert "commons_write" in box("archivist").available()
     assert "commons_write" not in box("mayor").available()
     assert "file_flag" in box("inspector").available()
@@ -205,7 +205,7 @@ def test_proposals_tools_and_board(town: Town, box) -> None:
         mayor.propose_tool("word_count", "def run(input): return ''", "", "dup")
     with pytest.raises(BatonError):
         mayor.propose_tool("Bad Name", "def run(input): return ''", "", "x")
-    out = mayor.post_board("move_in_request", "We need someone to tend the garden.", office="gardener")
+    out = mayor.town_square(kind="move_in_request", text= "We need someone to tend the garden.", office="gardener")
     assert "Robin decides" in out
     assert len(Registry(town).all()) == 3  # posting never founds
     box("inspector").review_item("commons/tools/pending/word_count", "Safe; pure function.")

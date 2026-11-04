@@ -1620,6 +1620,22 @@ export function moveInToTown(transport: WebUIMutationTransport, move: {
   return mutation<TownChange>(transport, "town.move_in", move);
 }
 
+/** The town square: threads everyone starts and replies to. Same as `babo square`. */
+export interface TownThread {
+  id: string; kind: string; title: string; author: string; text: string; status: string;
+  created: string; updated: string; closed_by: string; replies: { at: string; by: string; text: string }[];
+}
+export interface TownSquare { threads: TownThread[]; kinds: string[] }
+
+export function fetchTownSquare(token: string, base: string = ""): Promise<TownSquare> {
+  return request<TownSquare>(`${base}/api/town/square`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** The owner on the square: post (kind, title, text), reply (thread, text) or close (thread). */
+export function changeSquare(transport: WebUIMutationTransport, change: Record<string, string>): Promise<{ message: string; square: TownSquare }> {
+  return mutation<{ message: string; square: TownSquare }>(transport, "town.square", change);
+}
+
 /** The projects board: projects with a lead and a status, and their tickets. Same as `babo projects`. */
 export interface TownTicket {
   ref: string; project: string; number: number; title: string; status: string; assignee: string;

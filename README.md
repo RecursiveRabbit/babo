@@ -9,7 +9,7 @@ The name is short for *baton bot*. A resident's memory is passed forward like a 
 ## What a town is
 
 - **Residents** each have a home directory, their own notes, and a private memory. A town starts with the **Mayor**, the main agent you talk to in the web interface, the terminal and chat apps. Every other resident works in [opencode](https://opencode.ai): an **Archivist** to keep the shared knowledge, an **Inspector** as a second set of eyes, or any office the town needs. A new town has the Mayor alone, with those two offices vacant; a newcomer moves in when the Mayor asks and you approve, or when you move one in yourself.
-- **The commons** is what the town shares: knowledge, skills, tools, proposals, projects and a notice board.
+- **The commons** is what the town shares: knowledge, skills, tools, proposals, a projects board with tickets, and the town square, where anyone starts a thread and anyone replies.
 - **Memory is the residents' own.** The harness decides *when* a checkpoint happens; the resident decides *what* it says. Nothing summarizes a resident's mind behind its back, and compaction never loses data.
 - **Upkeep** runs whenever it's due and the model is free: each resident reviews its own recent work into memory, the Archivist (or the Mayor, until there is one) curates the commons as notes come in, the Inspector checks what residents said against what actually happened, and the town makes one commit. Quiet hours catch anything left over.
 - **You review** proposed tools, proposals (new rounds among them), move-in requests and old flags with `babo review` (or the review page in the web interface). Nothing that runs on your machine is approved without you.
