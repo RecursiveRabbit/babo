@@ -103,6 +103,23 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                 "required": ["task", "status"]}}}, "required": ["items"]},
         ),
         ToolSpec(
+            "project_board",
+            "The town's projects and their tickets. action: list (the board, or one project's tickets), new_project, "
+            "update_project (its lead: status, help_wanted), new_ticket, claim (take an open ticket), update_ticket "
+            "(status open/doing/blocked/done, a note, or who has it). Tickets are named like garden#3.",
+            {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["list", "new_project", "update_project", "new_ticket", "claim", "update_ticket"]},
+                "project": _str("The project's name (list, update_project, new_ticket)."),
+                "ticket": _str("The ticket, like garden#3 (claim, update_ticket)."),
+                "title": _str("new_project, new_ticket: in a few words."),
+                "description": _str("Optional: what it is, and what done looks like."),
+                "status": _str("update_project: active, paused, done. update_ticket: open, doing, blocked (say why in note), done."),
+                "note": _str("Optional: what you did or found, for whoever reads the ticket next."),
+                "assignee": _str("Optional: who has the ticket (a resident; empty to let it go)."),
+                "help_wanted": {"type": "boolean", "description": "Optional (new_project, update_project): ask others to take its tickets."}},
+             "required": ["action"]},
+        ),
+        ToolSpec(
             "revise_self",
             "Rewrite your SELF.md (your own words about yourself). Optionally record a name you have chosen.",
             {
@@ -390,6 +407,32 @@ class Toolbox:
             return baton_file.correct(home, self.resident_id, entry, fields, session=self.session or current_request_session_key() or "")
         except ValueError as exc:
             raise BatonError(str(exc)) from exc
+
+    def project_board(self, action: str, project: str = "", ticket: str = "", title: str = "", description: str = "",
+                      status: str = "", note: str = "", assignee: str | None = None, help_wanted: bool | None = None) -> str:
+        from babo.baton import projects
+
+        me = self.resident_id
+        if action == "list":
+            return projects.board_text(self.town, project or None, resident=me)
+        if action == "new_project":
+            p = projects.new_project(self.town, me, title or project, description, help_wanted=bool(help_wanted))
+            return f"Started {p.slug} (you lead it). Add its tickets with action new_ticket, project {p.slug}."
+        if action == "update_project":
+            p = projects.update_project(self.town, me, project, status=status or None, help_wanted=help_wanted,
+                                        lead=self._recipient(assignee).id if assignee else None,
+                                        description=description or None)
+            return f"Updated: {p.line()}"
+        if action == "new_ticket":
+            who = self._recipient(assignee).id if assignee else ""
+            t = projects.new_ticket(self.town, me, project, title, description, assignee=who)
+            return f"Added {t.line()}." + ("" if who else " Claim it to take it on.")
+        if action == "claim":
+            return f"It's yours: {projects.claim(self.town, me, ticket).line()}"
+        if action == "update_ticket":
+            who = None if assignee is None else (self._recipient(assignee).id if assignee.strip() else "")
+            return f"Updated: {projects.update_ticket(self.town, me, ticket, status=status or None, note=note, assignee=who).line()}"
+        raise BatonError("action is one of: list, new_project, update_project, new_ticket, claim, update_ticket.")
 
     def update_tasks(self, items: object) -> str:
         from babo.agent.tools.context import current_request_session_key

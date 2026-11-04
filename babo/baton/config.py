@@ -24,6 +24,7 @@ _COMMON_BATON = [
     "send_letter",
     "propose_tool",
     "propose_change",
+    "project_board",
 ]
 
 DEFAULT_TOOLSETS: dict[str, list[str]] = {

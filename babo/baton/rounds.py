@@ -15,7 +15,7 @@ going from house to house. Each is a readable file in the town
       - office: archivist
         or: mayor               # who does it while the office is vacant (optional)
         duty: Curate the notes waiting in the queue into the commons.
-        material: promotions    # what Babo gathers for it: promotions | inspection | previous | none
+        material: promotions    # what Babo gathers for it: promotions | inspection | tickets | previous | none
       - office: inspector
         duty: Review pending tools, open proposals and today's changes.
         material: inspection
@@ -49,7 +49,7 @@ from babo.baton.town import BatonError, Town, atomic_write, now_iso
 ROUNDS_DIR = "rounds"
 MARK = "[From Babo: a round]"
 EVENTS = {"checkpoint": "a checkpoint is filed", "session-wrapped-up": "a session wraps up", "proposal": "a proposal is filed"}
-MATERIALS = ("none", "previous", "promotions", "inspection")
+MATERIALS = ("none", "previous", "promotions", "inspection", "tickets")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
@@ -320,6 +320,12 @@ def waiting(town: Town, step: Step) -> str:
     if step.material == "inspection":
         count = len(_inspection_items(town))
         return f"{count} tool(s) or proposal(s) to inspect" if count else ""
+    if step.material == "tickets":
+        from babo.baton import projects
+
+        resident = step.who(town)
+        count = len(projects.open_tickets_for(town, resident)) if resident else 0
+        return f"{count} open ticket(s)" if count else ""
     return ""
 
 
@@ -488,6 +494,10 @@ async def run(ctx: Context, r: Round, *, trigger: str, session_key: str,
             material, after = promotions_material(ctx.town)
         elif step.material == "inspection":
             material = inspection_material(ctx.town, ctx.work_dir)
+        elif step.material == "tickets":
+            from babo.baton import projects
+
+            material = projects.tickets_material(ctx.town, resident)
         elif step.material == "previous":
             material = f"What the step before reported:\n\n{previous}" if previous else ""
         else:

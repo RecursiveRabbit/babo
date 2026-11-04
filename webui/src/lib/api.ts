@@ -1620,6 +1620,26 @@ export function moveInToTown(transport: WebUIMutationTransport, move: {
   return mutation<TownChange>(transport, "town.move_in", move);
 }
 
+/** The projects board: projects with a lead and a status, and their tickets. Same as `babo projects`. */
+export interface TownTicket {
+  ref: string; project: string; number: number; title: string; status: string; assignee: string;
+  created_by: string; created: string; updated: string; description: string; notes: string[];
+}
+export interface TownProject {
+  slug: string; title: string; lead: string; status: string; help_wanted: boolean; created: string; updated: string;
+  description: string; counts: Record<string, number>; tickets: TownTicket[];
+}
+export interface TownProjects { projects: TownProject[]; statuses: string[]; project_statuses: string[] }
+
+export function fetchTownProjects(token: string, base: string = ""): Promise<TownProjects> {
+  return request<TownProjects>(`${base}/api/town/projects`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** The owner's change to the board: new_project, update_project, new_ticket or update_ticket (as `babo projects`). */
+export function changeProjectBoard(transport: WebUIMutationTransport, change: Record<string, string | boolean>): Promise<{ message: string; projects: TownProjects }> {
+  return mutation<{ message: string; projects: TownProjects }>(transport, "town.projects", change);
+}
+
 /** A resident moves away: its sessions are frozen, its folder stays, and its office is a vacancy again. */
 export function moveAwayFromTown(transport: WebUIMutationTransport, resident: string): Promise<TownChange> {
   return mutation<TownChange>(transport, "town.move_away", { resident });

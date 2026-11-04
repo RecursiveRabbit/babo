@@ -1328,6 +1328,75 @@ def session_checkpoint(resident: str = typer.Argument(...), session_id: str = ty
         _fail(exc)
 
 
+projects_app = typer.Typer(help="The projects board: projects with a lead and a status, and their tickets.", invoke_without_command=True)
+app.add_typer(projects_app, name="projects")
+
+
+@projects_app.callback()
+def projects_board(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help="One project's tickets"),
+                   config: str | None = _CONFIG_OPT):
+    """The board (or one project's tickets, by status)."""
+    from babo.baton import projects
+
+    if ctx.invoked_subcommand:
+        return
+    t, _ = _town(config)
+    try:
+        console.print(escape(projects.board_text(t, project)), highlight=False)
+    except BatonError as exc:
+        _fail(exc)
+
+
+def _board_change(config: str | None, change: dict[str, Any]) -> None:
+    from babo.baton import views
+
+    t, _ = _town(config)
+    try:
+        console.print(views.change_project_board(t, change))
+    except BatonError as exc:
+        _fail(exc)
+
+
+@projects_app.command("new")
+def projects_new(title: str = typer.Argument(...), description: str = typer.Option("", "--description", "-d"),
+                 lead: str = typer.Option("", "--lead", help="A resident to lead it (default: you)"),
+                 help_wanted: bool = typer.Option(False, "--help-wanted", help="Ask residents to take its tickets"),
+                 config: str | None = _CONFIG_OPT):
+    """Start a project."""
+    change: dict[str, Any] = {"action": "new_project", "title": title, "description": description, "help_wanted": help_wanted}
+    if lead:
+        change["lead"] = lead
+    _board_change(config, change)
+
+
+@projects_app.command("ticket")
+def projects_ticket(project: str = typer.Argument(...), title: str = typer.Argument(...),
+                    description: str = typer.Option("", "--description", "-d"),
+                    assign: str = typer.Option("", "--assign", help="Give it to a resident now"), config: str | None = _CONFIG_OPT):
+    """Add a ticket to a project."""
+    _board_change(config, {"action": "new_ticket", "project": project, "title": title, "description": description, "assignee": assign})
+
+
+@projects_app.command("update")
+def projects_update(what: str = typer.Argument(..., help="A project (garden) or a ticket (garden#3)"),
+                    status: str = typer.Option("", "--status", help="project: active, paused, done; ticket: open, doing, blocked, done"),
+                    note: str = typer.Option("", "--note", help="A ticket: a note (and why, when blocked)"),
+                    assign: str | None = typer.Option(None, "--assign", help="A ticket: who has it (\"\" to nobody); a project: its lead"),
+                    help_wanted: bool | None = typer.Option(None, "--help-wanted/--no-help-wanted"), config: str | None = _CONFIG_OPT):
+    """Change a project, or a ticket."""
+    if "#" in what:
+        change: dict[str, Any] = {"action": "update_ticket", "ticket": what, "status": status, "note": note}
+        if assign is not None:
+            change["assignee"] = assign
+    else:
+        change = {"action": "update_project", "project": what, "status": status}
+        if assign:
+            change["lead"] = assign
+        if help_wanted is not None:
+            change["help_wanted"] = help_wanted
+    _board_change(config, change)
+
+
 @app.command("now")
 def now_command(config: str | None = _CONFIG_OPT):
     """What's happening in the town right now: the model queue, what Babo is working on, the running

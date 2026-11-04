@@ -49,6 +49,7 @@ TOWN_MUTATION_PATHS = {
     "town.rounds.access": "/api/town/rounds/access",
     "town.move_in": "/api/town/move-in",
     "town.move_away": "/api/town/move-away",
+    "town.projects": "/api/town/projects/change",
 }
 _DECISION_KINDS = ("tool", "proposal", "move_in", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
 _doctor_lock = asyncio.Lock()
@@ -300,6 +301,10 @@ class TownRoutes:
             from babo.baton import tasks
 
             return http_json_response({"lists": await asyncio.to_thread(lambda: [tasks.overview(x) for x in tasks.all_lists(_town()) if x.open])})
+        if got == "/api/town/projects":
+            from babo.baton import projects
+
+            return http_json_response(await asyncio.to_thread(lambda: projects.overview(_town())))
         if got == "/api/town/offices":
             from babo.baton import offices
 
@@ -410,6 +415,11 @@ class TownRoutes:
                 _town(), office, role=role, why=why,
                 profile={str(k): str(v) for k, v in cast(dict[object, object], profile).items()} if profile else None,
                 joins=cast(list[dict[str, object]], joins) if joins else None))
+        elif got == "/api/town/projects/change":
+            from babo.baton import projects
+
+            said = await asyncio.to_thread(lambda: views.change_project_board(_town(), payload))
+            return http_json_response({"message": said, "projects": await asyncio.to_thread(lambda: projects.overview(_town()))})
         elif got == "/api/town/move-away":
             resident = _text(payload, "resident", 80)
             message = await asyncio.to_thread(lambda: views.move_away(_town(), resident))
