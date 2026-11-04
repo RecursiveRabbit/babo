@@ -1977,7 +1977,9 @@ export interface TownRehearsal {
 }
 export interface TownRoundRun {
   round: string; trigger: string; started: string; finished: string; status: string;
-  steps: { office: string; resident: string; status: string; note: string; report: string }[];
+  steps: { office: string; resident: string; status: string; note: string; report: string;
+    /** What it was refused (older Babo: absent), and how many times it was tried. */
+    refused?: { tool: string; what: string }[]; tries?: number }[];
 }
 export interface TownRound {
   name: string; title: string; about: string; when: string; runs: "wait" | "now"; enabled: boolean;

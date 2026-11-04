@@ -38,6 +38,18 @@ beforeEach(async () => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("rounds", () => {
+  it("shows what a step was refused in its last run, and a step that was tried twice", async () => {
+    const refused = { ...data, rounds: [{ ...data.rounds[0], recent: [{ ...data.rounds[0].recent[0], status: "failed",
+      steps: [{ office: "archivist", resident: "archivist", status: "done", note: "", report: "No disk check.", refused: [{ tool: "shell", what: "df -h" }], tries: 1 },
+        { office: "inspector", resident: "inspector", status: "failed", note: "ConnectError: refused", report: "", tries: 2 }] }] }] };
+    mocks.fetch.mockImplementation(() => Promise.resolve(new Response(JSON.stringify(refused), { status: 200, headers: { "content-type": "application/json" } })));
+    render(<RoundsView onNotice={() => {}} onError={() => {}} />);
+    const night = await screen.findByRole("region", { name: "The night round" });
+    expect(within(night).getByRole("note", { name: "" })).toHaveTextContent("It was refused: shell df -h.");
+    expect(within(night).getByText(/failed: ConnectError: refused \(tried twice\)/)).toBeVisible();
+  });
+
+
   it("rehearses a round, shows what each step asked for, and approves the access it proposes, like `babo rounds rehearse|approve`", async () => {
     render(<RoundsView onNotice={() => {}} onError={() => {}} />);
     const night = await screen.findByRole("region", { name: "The night round" });

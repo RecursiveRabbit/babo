@@ -831,7 +831,40 @@ def freeze(town: Town, session: Session, *, review: Config | None = None, config
     return was_running
 
 
-def send(town: Town, config: Config, session: Session, text: str, *, config_path: Path, timeout_s: float = 1800) -> str:
+class Turn(str):
+    """A resident's reply to one message, with what it was refused along the way (``refused``: each
+    ``{"tool", "what"}``). It is the reply's text everywhere a string is expected."""
+
+    refused: list[dict[str, str]]
+
+    def __new__(cls, text: str, refused: list[dict[str, str]] | None = None) -> Turn:
+        turn = super().__new__(cls, text)
+        turn.refused = list(refused or [])
+        return turn
+
+
+def refusals(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The calls opencode refused in these messages (its rules, or Babo's): which tool, and what it was for."""
+    out: list[dict[str, str]] = []
+    for message in messages:
+        if message.get("type") != "assistant":
+            continue
+        for part in cast(list[dict[str, Any]], message.get("content") or []):
+            if part.get("type") != "tool":
+                continue
+            state = cast(dict[str, Any], part.get("state") or {})
+            error = cast(dict[str, Any], state.get("error") or {}) if state.get("status") == "error" else {}
+            if error.get("type") != "permission.rejected" and "permission denied" not in str(error.get("message", "")).lower():
+                continue
+            data = cast(dict[str, Any], state.get("input") or {}) if isinstance(state.get("input"), dict) else {}
+            what = data.get("command") or data.get("path") or data.get("filePath") or data.get("url") or data.get("pattern") or ""
+            entry = {"tool": str(part.get("name") or ""), "what": str(what)[:300]}
+            if entry not in out:
+                out.append(entry)
+    return out
+
+
+def send(town: Town, config: Config, session: Session, text: str, *, config_path: Path, timeout_s: float = 1800) -> Turn:
     """Send one message and wait for the resident's reply."""
     run = start(town, config, session, config_path=config_path)
     deadline = time.monotonic() + timeout_s
@@ -852,7 +885,7 @@ def send(town: Town, config: Config, session: Session, text: str, *, config_path
     if failed:
         error = cast(dict[str, Any], failed[-1].get("error") or {})
         raise BatonError(f"{session.resident}'s turn ended {failed[-1].get('outcome')}: {error.get('message', '')}".strip(": "))
-    return "\n".join(_text(m) for m in after if m.get("type") == "assistant" and _text(m)).strip()
+    return Turn("\n".join(_text(m) for m in after if m.get("type") == "assistant" and _text(m)).strip(), refusals(after))
 
 
 def prompt(town: Town, config: Config, session: Session, text: str, *, config_path: Path) -> str:

@@ -846,3 +846,12 @@ def test_a_resident_going_round_in_circles_has_its_tools_ended_and_answers_in_wo
         assert any(e.get("kind") == "drift" and e.get("rule") == "stopped" for e in resident_events(town, "archivist"))
     finally:
         opencode.freeze(town, session)
+
+
+@live
+def test_what_a_round_step_was_refused_comes_back_with_its_turn(town: Town, config_file, mock_llama: MockLlama) -> None:
+    path, cfg = config_file()
+    mock_llama.default = _router([tool_call("shell", {"command": "ls /", "description": "list the root"}), text("I couldn't list it.")])
+    turn = opencode.one_turn(town, cfg, "archivist", "List the root.", kind="round", config_path=path,
+                             access={"shell": "deny"}, commands=["ls /tmp"])
+    assert turn == "I couldn't list it." and turn.refused == [{"tool": "shell", "what": "ls /"}]  # type: ignore[attr-defined]
