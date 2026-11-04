@@ -818,3 +818,31 @@ def test_a_residents_record_is_written_only_with_its_tools(town: Town, config_fi
         assert sum(RECORD_REFUSAL in r for r in results) == 2, results  # both refused, saying what to use
     finally:
         opencode.freeze(town, session)
+
+
+@live
+def test_a_resident_going_round_in_circles_has_its_tools_ended_and_answers_in_words(town: Town, config_file, mock_llama: MockLlama) -> None:
+    from babo.baton.events import resident_events
+
+    path, cfg = config_file()
+    others = town.resident_dir("mayor") / "SELF.md"
+
+    def model(body: dict[str, Any]) -> dict[str, Any]:
+        seen.append(body)
+        print("REQ", len(seen), json.dumps(body["messages"][-1])[:240], flush=True)
+        print("REQ", len(seen), json.dumps(body["messages"][-1])[:300], flush=True)
+        if "tools are done for this turn" in json.dumps(body["messages"][-2:]):
+            return text("I'm stuck: I can't write the Mayor's file from here, and I'd need the Mayor to do it.")
+        return tool_call("write", {"path": str(others), "content": "Taken over."})
+
+    seen: list[dict[str, Any]] = []
+    mock_llama.default = model
+    session = opencode.new_session(town, cfg, "archivist", title="circles")
+    try:
+        said = opencode.send(town, cfg, session, "Fix the Mayor's file.", config_path=path)
+        assert said.startswith("I'm stuck")
+        assert len(mock_llama.requests) < 20  # it didn't spend its turn on the same refusal
+        opencode.ingest(town, opencode.get_session(town, "archivist", session.id))
+        assert any(e.get("kind") == "drift" and e.get("rule") == "stopped" for e in resident_events(town, "archivist"))
+    finally:
+        opencode.freeze(town, session)
