@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { useClient } from "@/providers/ClientProvider";
 import { SessionAccessFields } from "@/components/town/AccessFields";
+import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import {
   approveTownRehearsal, fetchTownRounds, rehearseTownRound, runTownRound, setTownRound, setTownRoundAccess,
   type TownRehearsal, type TownRound, type TownRoundStep, type TownRounds,
@@ -32,7 +33,7 @@ export function RoundsView({ onNotice, onError }: { onNotice: (message: string) 
 
   const act = async (name: string, work: () => Promise<TownRounds & { message: string }>) => {
     setBusy(name);
-    try { const next = await work(); setData(next); onNotice(next.message); }
+    try { const next = await work(); setData(next); onNotice(next.message); refreshActivity(); }
     catch (reason) { onError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(""); }
   };
@@ -100,6 +101,8 @@ function RoundCard({ round, busy, onRun, onSet, onRehearse, onApprove, onAccess 
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onRehearse(false)}>{t("town.rehearse", { defaultValue: "Rehearse" })}</Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onRehearse(true)}>{t("town.rehearseLive", { defaultValue: "Rehearse live" })}</Button>
+        <ActivityLine activityKey={`round:${round.name}`} />
+        <ActivityLine activityKey={`rehearsal:${round.name}`} />
         <p className="basis-full text-xs text-muted-foreground">
           {t("town.rehearsalIsTraining", { defaultValue: "A rehearsal is a training run: the residents really do the work, and learn from it. Letters, notes and posts are sent, and anything you allow really runs; only what each resident changes in its own folder is put back afterwards." })}
         </p>

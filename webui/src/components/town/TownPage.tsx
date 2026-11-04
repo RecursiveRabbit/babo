@@ -15,6 +15,7 @@ import { SessionAccessFields } from "@/components/town/AccessFields";
 import { RoundsView } from "@/components/town/RoundsView";
 import { OfficesPanel } from "@/components/town/OfficesPanel";
 import { TasksPanel } from "@/components/town/TasksPanel";
+import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { useClient } from "@/providers/ClientProvider";
 import {
   decideTownItem,
@@ -232,7 +233,7 @@ function UpkeepView({ town, transport, onChanged, onError }: {
   const up = town.upkeep;
   const catchUp = async () => {
     setBusy(true);
-    try { onChanged(await requestTownUpkeep(transport)); }
+    try { onChanged(await requestTownUpkeep(transport)); refreshActivity(); }
     catch (reason) { onError(errorText(reason)); }
     finally { setBusy(false); }
   };
@@ -256,6 +257,7 @@ function UpkeepView({ town, transport, onChanged, onError }: {
         <Button variant="secondary" disabled={busy || up.catch_up_requested || up.running || up.service !== "running"} onClick={() => void catchUp()}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : up.catch_up_requested ? t("town.catchUpAsked", { defaultValue: "Catch-up requested" }) : t("town.catchUp", { defaultValue: "Catch up now" })}
         </Button>
+        <ActivityLine activityKey="upkeep" />
       </div>
       {town.last_upkeep
         ? <details className="settings-list-row py-3">
@@ -631,11 +633,14 @@ function SessionsView({ token, transport, onNotice, onError, focus = null }: {
 
   const act = async (key: string, action: TownSessionAction, payload: Parameters<typeof changeTownSession>[2]) => {
     setBusy(key);
+    const watching = action === "checkpoint" || action === "freeze";
+    const early = watching ? window.setTimeout(refreshActivity, 400) : undefined;  // (freezing takes a while: show it working)
     try {
       const result = await changeTownSession(transport, action, payload);
+      if (watching) refreshActivity();
       setData(archived ? await fetchTownSessions(token(), "", true) : result); onNotice(result.message);
     } catch (reason) { onError(errorText(reason)); }
-    finally { setBusy(""); }
+    finally { setBusy(""); window.clearTimeout(early); }
   };
   const openSession = (resident: string, id: string) => {
     // Open the tab now, while the click still counts, and send it to the session once the link is ready.
@@ -739,6 +744,8 @@ function SessionRow({ session, presets, busy, onAction, onOpen, focused = false 
     <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setName(session.title); setTags((session.tags ?? []).join(", ")); setOrganizing((v) => !v); }}>
       {t("town.renameTag", { defaultValue: "Rename / tags" })}
     </Button>
+    <ActivityLine activityKey={`checkpoint:${session.resident}:${session.id}`} />
+    <ActivityLine activityKey={`freeze:${session.resident}:${session.id}`} />
     <details className="basis-full">
       <summary className="cursor-pointer text-xs text-muted-foreground">
         {t("town.sessionAccess", { defaultValue: "What it may do (changes now; a running session carries on where it was)" })}

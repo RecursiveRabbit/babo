@@ -1565,6 +1565,16 @@ export interface TownOverview {
 /** A round an office takes part in: its duty there, and (for a round that doesn't exist yet) when it runs. */
 export interface TownJoin { round: string; duty: string; material?: string; when?: Record<string, unknown> }
 
+/** Something Babo is working on (or just finished): `babo activity`. Keyed by what it is, e.g. `round:night`. */
+export interface TownActivity {
+  key: string; kind: string; label: string; status: "waiting" | "running" | "done" | "failed"; detail: string;
+  started: string; finished: string; resident: string; session: string; active: boolean;
+}
+
+export function fetchTownActivity(token: string, base: string = ""): Promise<{ activity: TownActivity[] }> {
+  return request<{ activity: TownActivity[] }>(`${base}/api/town/activity`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
 /** A task list an agent keeps as it works (one per conversation or session): `babo tasks`. */
 export interface TownTaskList {
   resident: string; session: string; updated: string; done: number; total: number; open: number;
