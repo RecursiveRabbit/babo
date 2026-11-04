@@ -522,6 +522,20 @@ def review(config: str | None = _CONFIG_OPT):
             console.print(views.decide(t, "move_in", req.name, yes=choice == "yes", reason=_reason(), commit=False))
             decided += 1
 
+    from babo.baton import leaving
+
+    going = [leaving.describe(t, p) for p in leaving.open_requests(t)]
+    if going:
+        console.print(f"\n[bold]Moving away[/bold] ({len(going)}): you can't refuse these, only acknowledge them (talk it over first if you want).")
+    for item in going:
+        console.print(f"\n• {item['resident']} ({item['office']}) asks to move away: {escape(item['reason'])}")
+        console.print(f"  Its handover for the next {item['office']}:\n{escape(item['handover'][:1500])}")
+        if item["keep"]:
+            console.print(f"  Notes it wants kept for the town: {', '.join(item['keep'])}")
+        if typer.confirm("Acknowledge it now (it moves away)?", default=False):
+            console.print(views.decide(t, "move_away", item["id"], yes=True, reason=_reason(), commit=False))
+            decided += 1
+
     flags = growth.stale_flags(t)
     console.print(f"\n[bold]4. Flags open for over a week[/bold] ({len(flags)})")
     for flag in flags:

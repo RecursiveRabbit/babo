@@ -52,7 +52,7 @@ TOWN_MUTATION_PATHS = {
     "town.projects": "/api/town/projects/change",
     "town.square": "/api/town/square/change",
 }
-_DECISION_KINDS = ("tool", "proposal", "move_in", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
+_DECISION_KINDS = ("tool", "proposal", "move_in", "move_away", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
 _doctor_lock = asyncio.Lock()
 
 
@@ -328,7 +328,7 @@ class TownRoutes:
         if got == "/api/town/decide":
             kind = payload.get("kind")
             if kind not in _DECISION_KINDS:
-                raise BatonError("kind must be tool, proposal, move_in, flag or errand")
+                raise BatonError("kind must be tool, proposal, move_in, move_away, flag or errand")
             yes = payload.get("yes")
             if not isinstance(yes, bool):
                 raise BatonError("missing yes")

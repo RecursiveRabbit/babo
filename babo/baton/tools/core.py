@@ -172,7 +172,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         ToolSpec(
             "propose_change",
-            "Propose a change to how the town or the harness works. The owner accepts or declines with a reason.",
+            "Propose a change to how the town or the harness works. The owner accepts or declines with a reason. "
+            "To move away from the town yourself: move_away, with why (rationale), a handover for whoever takes your "
+            "office next (description), and the notes worth keeping for the commons (keep); the owner acknowledges it.",
             {
                 "type": "object",
                 "properties": {
@@ -184,6 +186,8 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                     "round": _str("Optional: a round (rounds/<name>.md) to add, change or remove."),
                     "round_text": _str("With round: the whole file as it should be (title, when, steps with office and duty)."),
                     "remove_round": {"type": "boolean", "description": "With round: remove it."},
+                    "move_away": {"type": "boolean", "description": "You're asking to move away (see above)."},
+                    "keep": _list("With move_away: your notes worth keeping for the town, e.g. knowledge/soil.md."),
                 },
                 "required": ["title", "rationale", "description"],
             },
@@ -513,7 +517,14 @@ class Toolbox:
         return f"Proposed tool {name}. It will be tested in isolation, reviewed by the Inspector, and then goes to {self.town.owner_name}."
 
     def propose_change(self, title: str, rationale: str, description: str, project: str | None = None, town_name: str | None = None,
-                       round: str | None = None, round_text: str | None = None, remove_round: bool = False) -> str:
+                       round: str | None = None, round_text: str | None = None, remove_round: bool = False,
+                       move_away: bool = False, keep: list[str] | None = None) -> str:
+        if move_away:
+            from babo.baton import leaving
+
+            leaving.request(self.town, self.resident_id, reason=rationale, handover=description, keep=keep)
+            return (f"Your request to move away is with {self.town.owner_name}, who acknowledges it (and may want to talk it "
+                    "over first). Until then you're here as usual; your folder and memory stay in the town after you go.")
         town_name = " ".join((town_name or "").split())
         if len(town_name) > 60:
             raise BatonError("Not filed: a town name is at most 60 characters. Shorten it and propose again.")

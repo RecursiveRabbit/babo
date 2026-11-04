@@ -397,6 +397,9 @@ def approve_founding_request(town: Town, request: Path, *, approved_by: str, not
     joined = offices.join_rounds(town, office, (*template_office.joins, *[j for j in asked_joins if j not in template_office.joins]))
     if joined:
         meta["joined"] = joined
+    from babo.baton import leaving
+
+    leaving.hand_over(town, office, resident_id)  # what a predecessor who moved away left for the office
     meta.update({"status": "approved", "resident": resident_id, "decided": now_iso(), "decided_by": approved_by})
     if note:
         meta["decision_note"] = note

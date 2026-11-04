@@ -1556,7 +1556,7 @@ export interface TownOverview {
   root: string;
   residents: TownResident[];
   board: { kind: string; author: string; created: string; text: string }[];
-  pending: { tools: number; proposals: number; founding: number; flags: number; sessions: number };
+  pending: { tools: number; proposals: number; founding: number; flags: number; sessions: number; leaving?: number };
   last_upkeep: { pass: string; finished: boolean; steps: string[]; log: string } | null;
   upkeep: TownUpkeep;
   offices?: TownOffices;
@@ -1677,7 +1677,7 @@ export function requestTownUpkeep(transport: WebUIMutationTransport): Promise<To
   return mutation<TownChange>(transport, "town.upkeep", {});
 }
 
-export type TownDecisionKind = "tool" | "proposal" | "founding" | "flag" | "session";
+export type TownDecisionKind = "tool" | "proposal" | "founding" | "move_away" | "flag" | "session";
 
 /** A session the Mayor asked for: shown word for word; approving runs it with exactly this access. */
 export interface TownSessionRequest {
@@ -1719,6 +1719,8 @@ export interface TownReview {
   }[];
   founding: { id: string; office: string; author: string; body: string; profile?: Record<string, string>; joins?: TownJoin[] }[];
   flags: { id: string; to: string; by: string; at: string; claim: string }[];
+  /** Residents asking to move away: acknowledged, never refused (older Babo: absent). */
+  leaving?: { id: string; resident: string; office: string; reason: string; handover: string; keep: string[]; created: string }[];
 }
 
 export interface TownDoctorReport {

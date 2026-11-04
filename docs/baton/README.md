@@ -162,6 +162,12 @@ A resident can **move away** (*Move away* on the Residents tab, or `babo move-aw
 
 Nothing else brings a resident to town.
 
+## Moving away by choice
+
+A resident can decide to leave. It asks (`propose_change` with `move_away`), saying why, writing a **handover** for whoever takes its office next (what it was doing, what's unfinished, who to ask), and naming the notes of its own worth keeping for the town. You'll find the request in Review under *Moving away* (and in `babo review`), and you get a notice. You can't refuse it, only acknowledge it; talk it over with the resident in a session first if you want to. When you acknowledge it, the notes it chose are nominated for the commons (the Archivist curates them, like any nomination), the handover is filed in `commons/handovers/<office>/`, and the resident moves away: its sessions are frozen, its folder and memory stay in the town, and its office is a vacancy. The next newcomer to that office finds the handover in its inbox, as a letter from its predecessor, in its first session. It chooses its own name, as every newcomer does.
+
+The Mayor can't move away this way: the town needs one. The Mayor's own way out, a handover to a newcomer in the Mayor's office, is the next part of this work.
+
 ## While something works
 
 Things that take a while show how they're going right where you asked for them: *Checkpoint now* and *Freeze* under their session on the Sessions tab, *Run now* and *Rehearse* under their round on the Rounds tab, *Catch up now* beside upkeep. Each says *waiting to start*, *working on it* (and for how long), *done* (with how it went), or *didn't go through* (and why). `/checkpoint` in a chat with the Mayor says *Writing a checkpoint…* straight away, then that it's written; `babo session checkpoint` waits with a spinner. `babo activity` lists everything that's running, and what finished in the last half hour.
