@@ -537,3 +537,51 @@ def _queue_stats(cfg: BatonConfig) -> dict[str, Any]:
         return cast(dict[str, Any], data) if isinstance(data, dict) else {}
     except (httpx.HTTPError, ValueError):
         return {}
+
+
+def change_project_board(town: Town, change: dict[str, Any]) -> str:
+    """The owner's change to the projects board (the Projects tab, ``babo projects``): the same actions as
+    ``project_board``, done as the owner."""
+    from babo.baton import projects
+
+    def text(key: str, limit: int = 4000) -> str:
+        value = change.get(key)
+        if value is None:
+            return ""
+        if not isinstance(value, str) or len(value) > limit:
+            raise BatonError(f"{key} is text, at most {limit} characters")
+        return value.strip()
+
+    def resident(key: str) -> str | None:
+        if key not in change:
+            return None
+        name = text(key, 80)
+        if not name:
+            return ""
+        found = Registry(town).resolve(name)
+        if found is None or found.status != "active":
+            raise BatonError(f"No resident called '{name}'.")
+        return found.id
+
+    action = text("action", 40)
+    wanted = change.get("help_wanted")
+    help_wanted = wanted if isinstance(wanted, bool) else None
+    if action == "new_project":
+        p = projects.new_project(town, OWNER, text("title", 200), text("description"), help_wanted=bool(help_wanted))
+        lead = resident("lead")
+        if lead:
+            projects.update_project(town, OWNER, p.slug, lead=lead)
+        return f"Started {p.slug}."
+    if action == "update_project":
+        p = projects.update_project(town, OWNER, text("project", 80), status=text("status", 20) or None, help_wanted=help_wanted,
+                                    lead=resident("lead"), description=text("description") if "description" in change else None)
+        return f"Updated {p.slug}."
+    if action == "new_ticket":
+        t = projects.new_ticket(town, OWNER, text("project", 80), text("title", 200), text("description"),
+                                assignee=resident("assignee") or "")
+        return f"Added {t.ref}."
+    if action == "update_ticket":
+        t = projects.update_ticket(town, OWNER, text("ticket", 80), status=text("status", 20) or None, note=text("note", 2000),
+                                   assignee=resident("assignee"))
+        return f"Updated {t.ref}."
+    raise BatonError("action is one of: new_project, update_project, new_ticket, update_ticket")

@@ -17,6 +17,7 @@ import { OfficesPanel } from "@/components/town/OfficesPanel";
 import { TasksPanel } from "@/components/town/TasksPanel";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { ActivityView } from "@/components/town/ActivityView";
+import { ProjectsView } from "@/components/town/ProjectsView";
 import { useClient } from "@/providers/ClientProvider";
 import {
   decideTownItem,
@@ -50,7 +51,7 @@ import {
 import { cn } from "@/lib/utils";
 import "./town.css";
 
-type TownTab = "town" | "sessions" | "rounds" | "activity" | "review" | "profiles" | "doctor" | "settings";
+type TownTab = "town" | "sessions" | "projects" | "rounds" | "activity" | "review" | "profiles" | "doctor" | "settings";
 
 function errorText(reason: unknown): string {
   return reason instanceof Error && reason.message ? reason.message : String(reason);
@@ -121,6 +122,7 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
             options={[
               { value: "town", label: t("town.tab.town", { defaultValue: "Residents" }) },
               { value: "sessions", label: t("town.tab.sessions", { defaultValue: "Sessions" }) },
+              { value: "projects", label: t("town.tab.projects", { defaultValue: "Projects" }) },
               { value: "rounds", label: t("town.tab.rounds", { defaultValue: "Rounds" }) },
               { value: "activity", label: t("town.tab.activity", { defaultValue: "Activity" }) },
               { value: "review", label: waiting ? t("town.tab.reviewWaiting", { defaultValue: "Review ({{count}})", count: waiting }) : t("town.tab.review", { defaultValue: "Review" }) },
@@ -133,6 +135,8 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
           {tab === "town" && <ResidentsView town={town} onChanged={changed} onError={setError} transport={client} />}
           {tab === "review" && <ReviewView token={getToken} transport={client} onChanged={changed} onError={setError} />}
           {tab === "sessions" && <SessionsView focus={focus} token={getToken} transport={client} onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
+          {tab === "projects" && <ProjectsView onError={setError}
+            residents={(town?.residents ?? []).filter((r) => r.status === "active").map((r) => r.id)} />}
           {tab === "activity" && <ActivityView onError={setError} />}
           {tab === "rounds" && <RoundsView onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
           {tab === "profiles" && <ProfilesView token={getToken} transport={client} onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
