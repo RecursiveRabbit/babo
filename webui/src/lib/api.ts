@@ -1575,6 +1575,27 @@ export function fetchTownActivity(token: string, base: string = ""): Promise<{ a
   return request<{ activity: TownActivity[] }>(`${base}/api/town/activity`, token, undefined, API_READ_TIMEOUT_MS);
 }
 
+/** What's happening in the town right now: `babo now`. */
+export interface TownNow {
+  activity: TownActivity[];
+  sessions: { resident: string; id: string; title: string; kind: string; state: string; doing: string }[];
+  queue: { slots?: number; active?: number; waiting?: number; served?: number; idle_s?: number };
+  errands: { id: string; resident: string; task: string; status: string }[];
+  upkeep: TownUpkeep;
+}
+
+export function fetchTownNow(token: string, base: string = ""): Promise<TownNow> {
+  return request<TownNow>(`${base}/api/town/now`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** A Babo service's recent log: `babo logs <service>`. */
+export interface TownLogs { service: string; services: string[]; entries: { level: string; text: string }[] }
+
+export function fetchTownLogs(token: string, service: string, level: string, base: string = ""): Promise<TownLogs> {
+  const query = new URLSearchParams({ service, level, lines: "300" });
+  return request<TownLogs>(`${base}/api/town/logs?${query}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
 /** A task list an agent keeps as it works (one per conversation or session): `babo tasks`. */
 export interface TownTaskList {
   resident: string; session: string; updated: string; done: number; total: number; open: number;

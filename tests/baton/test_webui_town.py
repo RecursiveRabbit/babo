@@ -212,3 +212,29 @@ async def test_the_open_task_lists_from_the_web(town: Town, index_path: Path, mo
     tasks.update(town, "archivist", "s1", [{"task": "Finished", "status": "done"}])
     status, got = await _call(routes, "/api/town/tasks")
     assert status == 200 and [(x["resident"], x["done"], x["total"]) for x in got["lists"]] == [("mayor", 1, 2)]
+
+
+async def test_the_web_shows_now_and_logs(town: Town, index_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from babo.baton import logs, views
+
+    monkeypatch.setattr(logs, "folder", lambda: tmp_path)
+    (tmp_path / "gateway.log").write_text("2026-11-04 10:00:02.000 | WARNING  | x:y:1 - slow\n2026-11-04 10:00:03.000 | ERROR    | x:y:2 - it broke\n")
+    monkeypatch.setattr(views, "_queue_stats", lambda _cfg: {"slots": 1, "active": 0, "waiting": 0})
+    routes = _routes(town, index_path, monkeypatch)
+    status, got = await _call(routes, "/api/town/now")
+    assert status == 200 and got["queue"]["slots"] == 1 and {"activity", "sessions", "errands", "upkeep"} <= set(got)
+
+    async def logs_call(query: str) -> tuple[int, Any]:
+        response = await routes.dispatch(WsRequest(f"/api/town/logs?{query}", Headers()), "/api/town/logs")
+        assert response is not None
+        text = response.body.decode() if response.body else ""
+        try:
+            return response.status_code, json.loads(text)
+        except ValueError:
+            return response.status_code, text
+
+    status, got = await logs_call("service=gateway&level=WARNING&lines=1")
+    assert status == 200 and got["services"] == ["gateway", "queue", "upkeep"]
+    assert [e["level"] for e in got["entries"]] == ["ERROR"]
+    status, error = await logs_call("service=../../config")
+    assert status == 400 and "the services are" in str(error)

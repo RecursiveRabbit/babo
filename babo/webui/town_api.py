@@ -275,6 +275,23 @@ class TownRoutes:
             from babo.baton import rounds
 
             return http_json_response(await asyncio.to_thread(lambda: rounds.overview(_town())))
+        if got == "/api/town/now":
+            return http_json_response(await asyncio.to_thread(lambda: views.right_now(_town(), _baton())))
+        if got == "/api/town/logs":
+            from babo.baton import logs
+            from babo.webui.http_utils import parse_query
+
+            query = parse_query(request.path)
+            service = query.get("service", ["gateway"])[0]
+            if service not in logs.SERVICES:
+                raise BatonError(f"the services are: {', '.join(logs.SERVICES)}")
+            level = query.get("level", ["INFO"])[0]
+            try:
+                lines = max(1, min(1000, int(query.get("lines", ["200"])[0])))
+            except ValueError:
+                lines = 200
+            return http_json_response({"service": service, "services": list(logs.SERVICES),
+                                       "entries": await asyncio.to_thread(lambda: logs.tail(service, lines, level=level))})
         if got == "/api/town/activity":
             from babo.baton import activity
 

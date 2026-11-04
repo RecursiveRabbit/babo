@@ -233,6 +233,9 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
+        from babo.baton import logs
+
+        logs.add_file_sink("gateway")  # (a log the Town page can read, beside the console's)
         instance = instance_for_selectors(workspace=workspace, config=config)
         unconfigured_provider_error = None
         if validate_startup_config is not None:
