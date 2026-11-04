@@ -51,6 +51,7 @@ class Due:
     residents: list[str] = field(default_factory=list)  # whose activity a pass would review
     sessions: list[str] = field(default_factory=list)  # "<resident>/<session>" opencode sessions to review and freeze
     rounds: list[tuple[str, str]] = field(default_factory=list)  # (round, why) the next pass runs
+    own_time: list[tuple[str, str]] = field(default_factory=list)  # (resident, why): whose own time it is
     waiting_for: str = ""  # why not now, in plain words ("" when it may run)
 
     @property
@@ -165,6 +166,13 @@ def due(town: Town, cfg: BatonConfig, *, now: datetime, model_idle_s: int | None
         out.keys.append(f"round:{r.name}:{why}")
         urgent = urgent or r.runs == "now"
 
+    from babo.baton import own_time
+
+    for resident, why in own_time.due(town, now=now):
+        out.own_time.append((resident, why))
+        out.reasons.append(f"{resident}: {why}")
+        out.keys.append(f"own_time:{resident}:{now.date().isoformat()}")
+
     state = load_state(town)
     last = _parse(str(state.get("last_pass", "")))
     if quiet and (last is None or now - last >= timedelta(hours=20)) and not out.reasons:
@@ -225,7 +233,8 @@ async def run_pass(config: Config, plan: Due, **kwargs: Any) -> dict[str, Any]:
     else:
         activity.note(town, "upkeep", "upkeep", "Upkeep", detail="; ".join(plan.reasons)[:300])
     try:
-        result = await Night(config, residents=plan.residents, sessions=plan.sessions, rounds=plan.rounds, **kwargs).run()
+        result = await Night(config, residents=plan.residents, sessions=plan.sessions, rounds=plan.rounds,
+                             own_time=plan.own_time, **kwargs).run()
     except BaseException as exc:
         activity.update(town, "upkeep", "failed", f"{type(exc).__name__}: {exc}"[:300])
         raise
@@ -297,6 +306,10 @@ async def watch(config: Config) -> None:
                 from babo.baton import rounds
 
                 rounds.clear_requests(town)
+            if plan.run and plan.own_time:
+                from babo.baton import own_time
+
+                own_time.clear_requests(town)
             _heartbeat(town, plan, running=plan.run)
             if plan.run:
                 logger.info("Babo upkeep: {}", "; ".join(plan.reasons))

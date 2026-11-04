@@ -6,6 +6,7 @@ import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { useClient } from "@/providers/ClientProvider";
 import { SessionAccessFields } from "@/components/town/AccessFields";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
+import { OwnTimePanel } from "@/components/town/OwnTimePanel";
 import {
   approveTownRehearsal, fetchTownRounds, rehearseTownRound, runTownRound, setTownRound, setTownRoundAccess,
   type TownRehearsal, type TownRound, type TownRoundStep, type TownRounds,
@@ -50,6 +51,7 @@ export function RoundsView({ onNotice, onError }: { onNotice: (message: string) 
       onRehearse={(live) => void act(round.name, () => rehearseTownRound(client, round.name, live))}
       onApprove={(id) => void act(round.name, () => approveTownRehearsal(client, round.name, id))}
       onAccess={(step, access, commands) => void act(round.name, () => setTownRoundAccess(client, round.name, step, access, commands))} />)}
+    <OwnTimePanel onNotice={onNotice} onError={onError} />
     <section aria-label={t("town.baboOwn", { defaultValue: "Part of Babo" })} className="mt-4">
       <h2 className="settings-list-inset text-[13px] font-medium text-foreground">{t("town.baboOwn", { defaultValue: "Part of Babo" })}</h2>
       <p className="settings-list-inset text-xs text-muted-foreground">{t("town.baboOwnIntro", { defaultValue: "What Babo does itself, for every resident, whatever the rounds: upkeep." })}</p>

@@ -109,7 +109,7 @@ def _now() -> str:
     return stamp(datetime.now().astimezone())
 
 
-AgentTurn = Callable[[str, str, str], Awaitable[str]]  # (resident, message, session_key) -> reply
+AgentTurn = Callable[..., Awaitable[str]]  # (resident, message, session_key, kind="upkeep", access=None, commands=None) -> reply
 
 
 def upkeep_priority(cfg: Config) -> None:
@@ -164,6 +164,7 @@ class Night:
         residents: list[str] | None = None,
         sessions: list[str] | None = None,
         rounds: list[tuple[str, str]] | None = None,
+        own_time: list[tuple[str, str]] | None = None,
         agent_turn: AgentTurn | None = None,
         client: BatonModelClient | None = None,
         interrupt_after: str | None = None,
@@ -179,6 +180,8 @@ class Night:
         self.sessions = list(sessions or [])
         # The rounds this pass runs, each with why ((name, why)); None means the ones that are due now.
         self.rounds = rounds
+        # Whose own time this pass gives ((resident, why)); None means whoever's is due now.
+        self.own_time = own_time
         self.state_dir = self.town.state / "upkeep"
         self.work_dir = self.state_dir / self.night
         self.ledger = NightLedger.load(self.state_dir / f"{self.night}.json")
@@ -260,6 +263,7 @@ class Night:
                     await self.fold(resident)
                 self._checkpoint_interrupt(step)
             await self.run_rounds()
+            await self.run_own_time()
             if not self.ledger.done("postpass"):
                 summary.update(self.postpass())
         finally:
@@ -468,6 +472,41 @@ class Night:
             activity.update(self.town, step, "failed" if failed else "done",
                             f"stopped at {failed.office}: {failed.note}"[:300] if failed else f"{ran} step(s) done")
             self.ledger.mark(step, status=record.status, steps=[s.status for s in record.steps])
+            self._checkpoint_interrupt(step)
+
+    async def run_own_time(self) -> None:
+        """Each resident whose own time it is gets its turn (see ``babo.baton.own_time``)."""
+        from babo.baton import activity, own_time
+
+        chosen = self.own_time if self.own_time is not None else own_time.due(self.town, now=datetime.now().astimezone())
+        for resident, why in chosen:
+            step = f"own_time:{resident}"
+            if self.ledger.done(step):
+                continue
+            agent = Registry(self.town).get(resident)
+            if agent is None or agent.status != "active":
+                self.ledger.mark(step, status="skipped")
+                continue
+            key = f"own_time:{resident}"
+            shown = activity.get(self.town, key)
+            if shown is not None and shown.status == "waiting":
+                activity.update(self.town, key, "running", why)
+            else:
+                activity.note(self.town, key, "own_time", f"{resident}'s own time", detail=why, resident=resident)
+            started = now_iso()
+            try:
+                said = await self.agent_turn(resident, own_time.MESSAGE.format(when=started[:16].replace("T", " ")),
+                                             f"own-time:{resident}", "own-time")
+            except Exception as exc:  # its time comes round again; the pass goes on
+                own_time.record(self.town, resident, started=started, status="failed", said=f"{type(exc).__name__}: {exc}", why=why)
+                activity.update(self.town, key, "failed", f"{type(exc).__name__}: {exc}"[:300])
+                self.log(f"own time: {resident}: {exc}")
+                self.ledger.mark(step, status="failed")
+                continue
+            own_time.record(self.town, resident, started=started, status="done", said=str(said).strip(), why=why)
+            activity.update(self.town, key, "done", str(said).strip()[:300])
+            self.log(f"own time: {resident}: {str(said).strip()[:120]}")
+            self.ledger.mark(step, status="done")
             self._checkpoint_interrupt(step)
 
     # -- 5. post-pass ----------------------------------------------------------------

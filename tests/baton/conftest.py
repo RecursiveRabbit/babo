@@ -38,6 +38,9 @@ def _no_wait_before_a_retry(monkeypatch: pytest.MonkeyPatch) -> None:
 def town(tmp_path: Path) -> Town:
     # Most tests need the Archivist and the Inspector too; a new town has only the Mayor.
     t, _ = found_town(tmp_path / "town", offices=("mayor", "archivist", "inspector"), owner="Robin")
+    from babo.baton import own_time
+
+    own_time.set_every(t, "off")  # (most tests aren't about own time; theirs turn it on)
     return t
 
 

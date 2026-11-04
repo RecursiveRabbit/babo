@@ -1376,7 +1376,8 @@ def special_session(town: Town, config: Config, resident: str, kind: str, *, acc
         _, name, index = kind.split(":", 2)
         title = f"{resident}: round {name}, step {index}"
     else:
-        title = {"upkeep": f"{resident}: upkeep"}.get(kind, f"{resident}: visits from {kind.split(':', 1)[-1]}")
+        title = {"upkeep": f"{resident}: upkeep", "own-time": f"{resident}: own time"}.get(
+            kind, f"{resident}: visits from {kind.split(':', 1)[-1]}")
     return new_session(town, config, resident, title=title, kind=kind, overrides=cast(dict[str, object], dict(access or {})),
                        commands=list(commands or []), by=OWNER)
 
