@@ -215,9 +215,23 @@ def _unfinished_pass(town: Town) -> str | None:
 
 
 async def run_pass(config: Config, plan: Due, **kwargs: Any) -> dict[str, Any]:
+    from babo.baton import activity
+
     town = Town.open(config.baton.town_path)
     kwargs.setdefault("night", _unfinished_pass(town))
-    result = await Night(config, residents=plan.residents, sessions=plan.sessions, rounds=plan.rounds, **kwargs).run()
+    shown = activity.get(town, "upkeep")
+    if shown is not None and shown.status == "waiting":
+        activity.update(town, "upkeep", "running", "; ".join(plan.reasons)[:300])
+    else:
+        activity.note(town, "upkeep", "upkeep", "Upkeep", detail="; ".join(plan.reasons)[:300])
+    try:
+        result = await Night(config, residents=plan.residents, sessions=plan.sessions, rounds=plan.rounds, **kwargs).run()
+    except BaseException as exc:
+        activity.update(town, "upkeep", "failed", f"{type(exc).__name__}: {exc}"[:300])
+        raise
+    ok = result.get("status") == "ok"
+    activity.update(town, "upkeep", "done" if ok else "failed",
+                    "done" if ok else str(result.get("reason") or result.get("status") or "it didn't finish")[:300])
     state = load_state(town)
     if result.get("status") == "ok":
         state.update({"last_pass": now_iso(), "last_tried": now_iso(), "last_keys": plan.keys, "last_reasons": plan.reasons,

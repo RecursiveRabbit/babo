@@ -1307,13 +1307,42 @@ def session_remove(resident: str = typer.Argument(...), session_id: str = typer.
 def session_checkpoint(resident: str = typer.Argument(...), session_id: str = typer.Argument(...),
                        trigger: str = typer.Option("requested", "--trigger"), config: str | None = _CONFIG_OPT):
     """Have a resident write a checkpoint of a running session now, in its own words (Babo's plugin also calls this)."""
-    from babo.baton import opencode
+    from babo.baton import activity, opencode
 
     t, cfg = _town(config)
     try:
-        console.print(opencode.checkpoint(t, cfg, opencode.get_session(t, resident, session_id), trigger=trigger, config_path=_config_path()))
+        session = opencode.get_session(t, resident, session_id)
+        if trigger != "requested":  # (Babo's plugin, on its own schedule: no one is waiting on it)
+            console.print(opencode.checkpoint(t, cfg, session, trigger=trigger, config_path=_config_path()))
+            return
+        with activity.tracked(t, f"checkpoint:{resident}:{session.id}", "checkpoint", f"{resident} is writing a checkpoint",
+                              resident=resident, session=session.id), console.status(f"{resident} is writing a checkpoint…"):
+            said = opencode.checkpoint(t, cfg, session, trigger=trigger, config_path=_config_path())
+        console.print(said)
     except BatonError as exc:
         _fail(exc)
+
+
+@app.command("activity")
+def activity_command(config: str | None = _CONFIG_OPT):
+    """What Babo is working on now (checkpoints, freezes, rounds, rehearsals, evals, upkeep), and what just finished."""
+    from datetime import datetime
+
+    from babo.baton import activity
+
+    t, _ = _town(config)
+    entries = activity.recent(t)
+    if not entries:
+        console.print("Nothing is running, and nothing finished in the last half hour.")
+        return
+    now = datetime.now().astimezone()
+    for e in entries:
+        since = int((now - datetime.fromisoformat(e.finished or e.started)).total_seconds()) if (e.finished or e.started) else 0
+        ago = f"{since // 60} min" if since >= 60 else f"{since} s"
+        mark = {"waiting": "[dim]waiting[/dim]", "running": "[yellow]running[/yellow]", "done": "[green]done[/green]",
+                "failed": "[red]failed[/red]"}[e.status]
+        when = f"for {ago}" if e.active else f"{ago} ago"
+        console.print(f"{mark}  {escape(e.label)}  [dim]{when}{' · ' + escape(e.detail) if e.detail else ''}[/dim]")
 
 
 @app.command()

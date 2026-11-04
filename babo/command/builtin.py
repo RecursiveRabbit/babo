@@ -269,11 +269,23 @@ async def cmd_checkpoint(ctx: CommandContext) -> OutboundMessage:
         if not history:
             return reply("Nothing has happened in this chat yet, so there's nothing to checkpoint.")
         messages = [{"role": "system", "content": loop.context.build_system_prompt(channel=msg.channel)}, *history]
+    from babo.baton import activity
+
+    town = formation.town
+    key = f"checkpoint:{formation.resident_id}:{ctx.key}"
+    activity.note(town, key, "checkpoint", f"{formation.resident_id} is writing a checkpoint", resident=formation.resident_id,
+                  session=ctx.key)
+    try:  # it takes the model a while: say so now, in the chat it was asked in
+        await loop.bus.publish_outbound(reply("Writing a checkpoint…"))
+    except Exception:
+        logger.debug("Baton: couldn't say the checkpoint is being written in {}", ctx.key)
     try:
         outcome = await formation.checkpoint_now(ctx.key, messages, "requested")
     except Exception as exc:
         logger.exception("Baton: /checkpoint failed for {}", ctx.key)
+        activity.update(town, key, "failed", str(exc)[:300])
         return reply(f"The checkpoint couldn't be written: {exc}")
+    activity.update(town, key, "done", "written in its own words" if outcome.authored else "recorded from what happened")
     thread = outcome.checkpoint.thread
     if outcome.authored:
         return reply(f"Checkpoint written: {thread}" if thread else "Checkpoint written.")

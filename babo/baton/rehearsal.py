@@ -224,10 +224,31 @@ def _wait_for_turn(town: Town, config: Config, session: Any, sent: str, report: 
 
 
 def rehearse(town: Town, config: Config, round_name: str, *, live: bool, config_path: Path) -> Rehearsal:
-    """Rehearse every step of a round, one after the other, and keep the report."""
-    from babo.baton import notices, opencode
+    """Rehearse every step of a round, one after the other, and keep the report (its progress is an activity)."""
+    from babo.baton import activity
 
     r = rounds.get(town, round_name)
+    key = f"rehearsal:{round_name}"
+    shown = activity.get(town, key)
+    if shown is not None and shown.status == "waiting":
+        activity.update(town, key, "running", "live" if live else "unattended")
+    else:
+        activity.note(town, key, "rehearsal", f"Rehearsal of {r.title}", detail="live" if live else "unattended")
+    try:
+        done = _rehearse(town, config, r, live=live, config_path=config_path)
+    except BaseException as exc:
+        activity.update(town, key, "failed", f"{type(exc).__name__}: {exc}"[:300])
+        raise
+    failed = [s for s in done.steps if s.status == "failed"]
+    activity.update(town, key, "failed" if failed else "done",
+                    f"step {done.steps.index(failed[0]) + 1}: {failed[0].note}"[:300] if failed else "its report is on the Rounds tab")
+    return done
+
+
+def _rehearse(town: Town, config: Config, r: rounds.Round, *, live: bool, config_path: Path) -> Rehearsal:
+    from babo.baton import notices, opencode
+
+    round_name = r.name
     stamp = now_iso()[:19].replace(":", "").replace("T", "-")
     rehearsal = Rehearsal(id=f"{round_name}--{stamp}", round=round_name, live=live)
     save(town, rehearsal)
@@ -365,6 +386,10 @@ def request(town: Town, round_name: str, *, live: bool) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, json.dumps(wanted) + "\n")
     how = "live: its questions will come to you on the Sessions tab" if live else "unattended: what it asks for is written down"
+    from babo.baton import activity
+
+    activity.note(town, f"rehearsal:{round_name}", "rehearsal", f"Rehearsal of {r.title}", status="waiting",
+                  detail=f"starts within a minute ({'live' if live else 'unattended'})")
     return f"A rehearsal of “{r.title}” starts within a minute ({how})."
 
 

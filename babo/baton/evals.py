@@ -460,18 +460,27 @@ def start_background(town: Town, model: BatonModelConfig, preset: str, *, real_m
             raise BatonError(f"An eval of {_running['preset']} is already running ({_running['done']}/{_running['total']}).")
         _running.update({"preset": preset, "done": 0, "total": len(TASKS), "passed": 0, "error": ""})
 
+    from babo.baton import activity
+
+    key = f"eval:{preset}"
+    activity.note(town, key, "eval", f"Eval of {preset}", detail=f"0 of {len(TASKS)} tasks")
+
     def progress(outcome: Outcome) -> None:
         with _running_lock:
             _running["done"] += 1
             _running["passed"] += outcome.passed
+            done, passed = _running["done"], _running["passed"]
+        activity.update(town, key, "running", f"{done} of {len(TASKS)} tasks, {passed} passed")
 
     def work() -> None:
         try:
             report = asyncio.run(run(model, preset, list(TASKS), progress=progress, real_model=real_model))
             save(town, report, baseline=baseline_too)
+            activity.update(town, key, "done", f"{report.passed} of {len(report.outcomes)} passed")
         except Exception as exc:  # shown as the run's result; nothing else depends on it
             with _running_lock:
                 _running["error"] = str(exc)
+            activity.update(town, key, "failed", str(exc)[:300])
         finally:
             with _running_lock:
                 _running.clear()

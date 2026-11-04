@@ -450,8 +450,23 @@ class Night:
                 self.log(f"round {name}: {exc}")
                 self.ledger.mark(step, status="missing")
                 continue
-            record = await rounds.run(self, r, trigger=why, session_key=f"night:{self.night}",
-                                      done=self.ledger.done, mark=lambda key, info: self.ledger.mark(key, **info))
+            from babo.baton import activity
+
+            shown = activity.get(self.town, step)
+            if shown is not None and shown.status == "waiting":
+                activity.update(self.town, step, "running", why)
+            else:
+                activity.note(self.town, step, "round", r.title, detail=why)
+            try:
+                record = await rounds.run(self, r, trigger=why, session_key=f"night:{self.night}",
+                                          done=self.ledger.done, mark=lambda key, info: self.ledger.mark(key, **info))
+            except BaseException as exc:
+                activity.update(self.town, step, "failed", f"{type(exc).__name__}: {exc}"[:300])
+                raise
+            failed = next((s for s in record.steps if s.status == "failed"), None)
+            ran = sum(1 for s in record.steps if s.status == "done")
+            activity.update(self.town, step, "failed" if failed else "done",
+                            f"stopped at {failed.office}: {failed.note}"[:300] if failed else f"{ran} step(s) done")
             self.ledger.mark(step, status=record.status, steps=[s.status for s in record.steps])
             self._checkpoint_interrupt(step)
 
