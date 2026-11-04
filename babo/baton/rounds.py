@@ -603,6 +603,10 @@ def request_run(town: Town, name: str) -> str:
         wanted.append(name)
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, json.dumps(wanted) + "\n")
+    from babo.baton import activity
+
+    activity.note(town, f"round:{name}", "round", r.title, status="waiting",
+                  detail="starts within a minute" + ("" if r.runs == "now" else ", when the model is free"))
     return f"“{r.title}” starts within a minute (the upkeep service runs it)."
 
 

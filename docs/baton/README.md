@@ -162,6 +162,10 @@ A resident can **move away** (*Move away* on the Residents tab, or `babo move-aw
 
 Nothing else brings a resident to town.
 
+## While something works
+
+Things that take a while show how they're going right where you asked for them: *Checkpoint now* and *Freeze* under their session on the Sessions tab, *Run now* and *Rehearse* under their round on the Rounds tab, *Catch up now* beside upkeep. Each says *waiting to start*, *working on it* (and for how long), *done* (with how it went), or *didn't go through* (and why). `/checkpoint` in a chat with the Mayor says *Writing a checkpoint…* straight away, then that it's written; `babo session checkpoint` waits with a spinner. `babo activity` lists everything that's running, and what finished in the last half hour.
+
 ## Task lists
 
 For work with several steps, the Mayor and the residents keep a task list as they go (`update_tasks`: the whole list each time, each step *todo*, *doing*, *done* or *dropped*). Babo shows it back to them after each change, and again with each new message while something on it is still open, so a small model doesn't lose its place in a long piece of work. There's one list per conversation (the Mayor's) or session (a resident's); what carries over to the next session is the baton, as always.

@@ -138,9 +138,11 @@ def upkeep_status(town: Town, cfg: BatonConfig) -> dict[str, Any]:
 
 
 def request_upkeep(town: Town) -> str:
-    from babo.baton import upkeep
+    from babo.baton import activity, upkeep
 
-    return upkeep.request_catch_up(town)
+    said = upkeep.request_catch_up(town)
+    activity.note(town, "upkeep", "upkeep", "Upkeep", status="waiting", detail="starts within a minute")
+    return said
 
 
 def _requests() -> Any:
@@ -340,13 +342,20 @@ def checkpoint_session(town: Town, config: Config, resident: str, session_id: st
     if opencode.running(town, session) is None:
         raise BatonError("That session isn't running; resume it first, or freeze it to have it reviewed.")
 
+    from babo.baton import activity
+
+    key = f"checkpoint:{resident}:{session_id}"
+    activity.note(town, key, "checkpoint", f"{resident} is writing a checkpoint", resident=resident, session=session_id)
+
     def write() -> None:
         try:
             opencode.checkpoint(town, config, session, trigger="requested", config_path=config_path)
+            activity.update(town, key, "done", "written in its own words")
         except Exception as exc:  # the safety net reviews it later; say why in the log
             from loguru import logger
 
             logger.warning("Babo: {}'s checkpoint for {} didn't go through: {}", resident, session_id, exc)
+            activity.update(town, key, "failed", f"{exc}"[:300] or type(exc).__name__)
 
     threading.Thread(target=write, name=f"checkpoint-{resident}-{session_id}", daemon=True).start()
     return f"{resident} is writing a checkpoint of this session in its own words."
@@ -403,10 +412,13 @@ def resume_session(town: Town, config: Config, resident: str, session_id: str, *
 
 
 def freeze_session(town: Town, config: Config, resident: str, session_id: str, *, config_path: Any) -> str:
-    from babo.baton import opencode
+    from babo.baton import activity, opencode
 
     session = opencode.get_session(town, resident, session_id)
-    was = opencode.freeze(town, session, review=config, config_path=config_path)
+    with activity.tracked(town, f"freeze:{resident}:{session_id}", "freeze", f"{resident} is reviewing “{session.title}” into its memory",
+                          resident=resident, session=session_id) as entry:
+        was = opencode.freeze(town, session, review=config, config_path=config_path)
+        entry.detail = "frozen" if was else "it wasn't running"
     reviewed = opencode.get_session(town, resident, session_id).reviewed
     if not was:
         return f"“{session.title}” wasn't running."
