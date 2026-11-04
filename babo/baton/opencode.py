@@ -1040,7 +1040,7 @@ def ingest(town: Town, session: Session) -> list[dict[str, Any]]:
 
             rule, tool, times = str(raw.get("rule", ""))[:40], str(raw.get("tool", ""))[:80], raw.get("times")
             append_event(town, session.resident, session.key, drift.EVENT, at=at, via="opencode", rule=rule, tool=tool, times=times)
-            if times == 2:
+            if times == 2 or rule == "stopped":  # (stopped: tools ended for that turn, after the third reminder)
                 drift.tell_owner(town, session.resident, session.id, session.title, rule, tool)
         elif raw.get("kind") == "guide":
             append_event(town, session.resident, session.key, "guide", at=at, via="opencode",

@@ -101,6 +101,14 @@ export default {
       return !local.startsWith("/") && !local.startsWith("../") && RECORD.test(local)
     }
     await ctx.permission.hook("evaluate", async (event) => {
+      // Going round in circles: after the third reminder in a turn, tools are done until the next message.
+      if (toolsDone) {
+        event.effect = "deny"
+        event.message = TOOLS_DONE
+        refusedSince += 1
+        if (refusedSince >= STOP_TURN_AFTER) stopTurn()
+        return
+      }
       if (event.action === "edit" && (event.resources ?? [event.resource]).some(inRecord)) {
         event.effect = "deny"
         event.message = env.BABO_RECORD_REFUSAL || "Your record is written only with checkpoint and correct_checkpoint."
@@ -115,12 +123,23 @@ export default {
     })
 
     await ctx.session.hook("prompt", async () => {
+      turnTrips = 0
+      toolsDone = false
+      refusedSince = 0
       spool({ kind: "turn_start" })
       if (idleTimer) clearTimeout(idleTimer)
       await waitForTownTools()
     })
 
     await ctx.tool.hook("execute.before", async (event) => {
+      // Every call, refused or not, is seen here (a call opencode's own rules refuse never runs, so it never
+      // reaches execute.after): the same call over and over trips the loop rule even when it's refused.
+      seenBefore(String(event.tool), event.input)
+      if (toolsDone) {
+        refusedSince += 1
+        if (refusedSince >= STOP_TURN_AFTER) stopTurn()
+        throw new Error(TOOLS_DONE)
+      }
       const command = event.tool === "shell" ? String(event.input?.command ?? "") : ""
       // The commit gate: work isn't committed until its checkpoint is written.
       if (command && COMMIT.test(command) && since >= Math.min(GATE, EVERY)) await checkpoint("commit")
@@ -169,6 +188,23 @@ export default {
     // (The same rules as Babo's own, in drift.py.)
     const recent = []
     const tripped = {}
+    // The third time in a turn, tools end for the turn: every call is refused with TOOLS_DONE (the turn
+    // carries on, so it can answer in words); if it still keeps calling tools, Babo stops the turn.
+    const STOP_AFTER = 3
+    const REPEATS = 3
+    const STOP_TURN_AFTER = 4
+    const TOOLS_DONE = "You've been going round in circles, so tools are done for this turn. Answer in words: what you were " +
+      "trying to do, what is in the way, and what you'd need (a tool, access, or help) to go on."
+    let turnTrips = 0
+    let toolsDone = false
+    let refusedSince = 0
+    const stopTurn = () => {
+      if (refusedSince !== STOP_TURN_AFTER) return
+      spool({ kind: "drift", rule: "turn_stopped", tool: "", times: turnTrips })
+      const proc = spawn(env.BABO_BIN, ["session", "stop", env.BABO_RESIDENT, env.BABO_SESSION, "--config", env.BABO_CONFIG],
+        { stdio: "ignore" })
+      proc.on("error", () => {})
+    }
     const REFUSED = ["permission denied", "permission.rejected", "blocked", "not allowed", "is not available"]
     const sortKeys = (value) => Array.isArray(value) ? value.map(sortKeys)
       : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeys(value[k])])) : value
@@ -179,15 +215,43 @@ export default {
       recent.push({ sig, tool, refused: wasRefused })
       if (recent.length > 6) recent.shift()
       let rule = ""
-      if (recent.filter((call) => call.sig === sig).length >= 3) rule = "repeat"
-      else if (refusedBefore && wasRefused) rule = "refused_again"
+      if (refusedBefore && wasRefused) rule = "refused_again"  // (repeats are caught before a call runs: seenBefore)
       if (!rule) return ""
       recent.length = 0
       tripped[rule] = (tripped[rule] ?? 0) + 1
       spool({ kind: "drift", rule, tool, times: tripped[rule] })
+      turnTrips += 1
+      if (turnTrips >= STOP_AFTER && !toolsDone) {
+        toolsDone = true
+        spool({ kind: "drift", rule: "stopped", tool, times: turnTrips })
+        return `[Babo: ${TOOLS_DONE}]`
+      }
       const what = rule === "repeat" ? `You've made the same \`${tool}\` call 3 times; it will give the same answer.`
         : `\`${tool}\` was refused, and trying it again will be refused again.`
       return `[Babo: ${what} Step back: what do you actually need? Try a different way, or say plainly what's in the way and stop there.]`
+    }
+
+    // Calls seen before they run, for the repeat rule; a call that does run is then checked again by drift()
+    // with its result, so it isn't counted twice.
+    const pending = []
+    const seenBefore = (tool, input) => {
+      const sig = `${tool} ${JSON.stringify(sortKeys(input ?? {}))}`
+      pending.push(sig)
+      if (pending.length > 6) pending.shift()
+      if (pending.filter((s) => s === sig).length >= REPEATS && !toolsDone) {
+        pending.length = 0
+        recent.length = 0
+        tripped.repeat = (tripped.repeat ?? 0) + 1
+        spool({ kind: "drift", rule: "repeat", tool, times: tripped.repeat })
+        turnTrips += 1
+        if (turnTrips >= STOP_AFTER) {
+          toolsDone = true
+          spool({ kind: "drift", rule: "stopped", tool, times: turnTrips })
+        } else {
+          throw new Error(`[Babo: You've made the same \`${tool}\` call ${REPEATS} times; it will give the same answer. ` +
+            "Step back: what do you actually need? Try a different way, or say plainly what's in the way and stop there.]")
+        }
+      }
     }
 
     await ctx.tool.hook("execute.after", (event) => {
