@@ -177,10 +177,12 @@ def _profile_tools(town: Town, cfg: Config, resident: str, office: str) -> list[
 @app.command()
 def queue(config: str | None = _CONFIG_OPT):
     """Run the model queue: the one line every model call in the town waits in."""
+    from babo.baton import logs
     from babo.baton.queue import serve
     from babo.config.loader import get_config_path
 
     cfg = _config(config)
+    logs.add_file_sink("queue")
     console.print(f"Model queue on {cfg.baton.model.queue_host}:{cfg.baton.model.queue_port} -> {cfg.baton.model.upstream}"
                   " (other providers through Babo's gateway)")
     asyncio.run(serve(cfg.baton.model, cfg.baton.capture_dir, config_path=get_config_path().resolve()))
@@ -250,6 +252,9 @@ def upkeep(
     try:
         cfg = _config(config)
         if watch:
+            from babo.baton import logs
+
+            logs.add_file_sink("upkeep")
             asyncio.run(town_upkeep.watch(cfg))
             return
         if now:
@@ -1321,6 +1326,51 @@ def session_checkpoint(resident: str = typer.Argument(...), session_id: str = ty
         console.print(said)
     except BatonError as exc:
         _fail(exc)
+
+
+@app.command("now")
+def now_command(config: str | None = _CONFIG_OPT):
+    """What's happening in the town right now: the model queue, what Babo is working on, the running
+    sessions and what each is doing, errands, and upkeep."""
+    from babo.baton import views
+
+    t, cfg = _town(config)
+    now = views.right_now(t, cfg.baton)
+    q = now["queue"]
+    if "slots" in q:
+        console.print(f"Model: {q.get('active', 0)} of {q['slots']} busy, {q.get('waiting', 0)} waiting")
+    else:
+        console.print("[red]Model: the queue isn't answering.[/red]")
+    up = now["upkeep"]
+    console.print("Upkeep: " + ("working now" if up.get("running") else
+                                ("waiting: " + " · ".join(up["waiting"]) if up.get("waiting") else "nothing is waiting")))
+    running = [a for a in now["activity"] if a["active"]]
+    for a in running:
+        console.print(f"[yellow]{a['status']}[/yellow]  {escape(a['label'])}" + (f"  [dim]{escape(a['detail'])}[/dim]" if a["detail"] else ""))
+    for s in now["sessions"]:
+        console.print(f"{s['resident']}  {escape(s['title'])}  [dim]{s['state']}{' · ' + escape(s['doing']) if s['doing'] else ''}[/dim]")
+    for e in now["errands"]:
+        console.print(f"errand for {e['resident']}  {escape(e['task'])}  [dim]{e['status']}[/dim]")
+    if not (running or now["sessions"] or now["errands"]):
+        console.print("All quiet: nothing is running.")
+
+
+@app.command("logs")
+def logs_command(service: str = typer.Argument("gateway", help="gateway, queue or upkeep"),
+                 lines: int = typer.Option(50, "-n", "--lines", help="How many entries"),
+                 level: str = typer.Option("INFO", "--level", help="DEBUG, INFO, WARNING or ERROR (and up)")):
+    """A Babo service's recent log (the same as the Town page's Activity tab)."""
+    from babo.baton import logs
+
+    if service not in logs.SERVICES:
+        _fail(BatonError(f"the services are: {', '.join(logs.SERVICES)}"))
+    entries = logs.tail(service, lines, level=level)
+    if not entries:
+        console.print(f"Nothing logged yet in {logs.path(service)}. The service writes it once it's been restarted on this version.")
+        return
+    for e in entries:
+        style = {"WARNING": "yellow", "ERROR": "red", "CRITICAL": "red", "DEBUG": "dim"}.get(e["level"])
+        console.print(f"[{style}]{escape(e['text'])}[/{style}]" if style else escape(e["text"]), highlight=False)
 
 
 @app.command("activity")

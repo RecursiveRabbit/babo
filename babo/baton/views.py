@@ -501,3 +501,39 @@ def _read(path: Any) -> str:
         return str(path.read_text(encoding="utf-8"))
     except OSError:
         return ""
+
+
+def right_now(town: Town, cfg: BatonConfig) -> dict[str, Any]:
+    """What is happening in the town right now (``babo now``, the Activity tab): what Babo is working on,
+    the residents' running sessions and what each is doing, the model queue, errands, and upkeep."""
+    from babo.baton import activity, opencode, requests
+
+    sessions: list[dict[str, Any]] = []
+    for resident in Registry(town).all():
+        if resident.status != "active":
+            continue
+        for session in opencode.sessions(town, resident.id):
+            if opencode.running(town, session) is None:
+                continue
+            try:
+                state = opencode.live(town, session)
+            except Exception:  # (a session that's just stopped, or not answering)
+                state = {"state": "running", "activity": ""}
+            sessions.append({"resident": resident.id, "id": session.id, "title": session.title, "kind": session.kind,
+                             "state": state.get("state", ""), "doing": state.get("activity", "")})
+    errands = [{"id": r.id, "resident": r.resident, "task": first_line(r.task, 120), "status": r.status}
+               for r in requests.all_requests(town) if r.status in ("approved", "running")]
+    return {"activity": activity.overview(town), "sessions": sessions, "queue": _queue_stats(cfg), "errands": errands,
+            "upkeep": upkeep_status(town, cfg)}
+
+
+def _queue_stats(cfg: BatonConfig) -> dict[str, Any]:
+    """The model queue's own count of what it's serving and what waits (empty when it isn't running)."""
+    import httpx
+
+    try:
+        response = httpx.get(cfg.model.endpoint.rstrip("/").removesuffix("/v1") + "/baton/queue", timeout=2)
+        data: object = response.json()
+        return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+    except (httpx.HTTPError, ValueError):
+        return {}
