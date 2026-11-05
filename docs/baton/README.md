@@ -151,6 +151,14 @@ Ask for it as an errand with the exact command, e.g. `sudo pacman -S --noconfirm
 
 Results are kept in the town, under `state/eval/`.
 
+## How well the harness works with a model: `babo trial`
+
+`babo eval` asks single questions with tools of its own. `babo trial` runs the real thing: short pieces of work for the Mayor (write a file, fix a typo without losing the rest, read a letter and answer it, run a script and report what it printed, post on the town square, send an errand, route commons work, and leave tools alone when nothing needs one), each in a throwaway town of its own made up for the trial, with the system prompt, tools and guides the Mayor really gets. Each is judged by what happened in that town, not by the first reply.
+
+- `babo trial` runs every scenario three times on the default preset; `--preset`, `--only <scenario or category>`, `--repeat` and `--list` as for the eval.
+- It changes nothing outside the throwaway towns: commands that install software, take privileges or reach the network are refused.
+- Every model call is recorded: what was sent, and what came back (text, thinking, tool calls, time, tokens). The report says what went wrong when a scenario failed (no action, a call written as text, a tool it doesn't have, a tool's error, the step limit) and is written to `state/trial/` as one `.json.gz` file. It holds nothing from your own town, so it can be shared with whoever is tuning Babo.
+
 ## The town's name
 
 A new town has no name. The residents choose one: any of them can propose a name with `propose_change`, and it comes to you in `babo review` like any other proposal. Accept it and the town takes the name at once; every resident sees it at the start of their next session, and `babo town` shows it. You can also name it yourself with `babo town --name "…"`, but it's nicer to let them.
