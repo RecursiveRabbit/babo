@@ -321,10 +321,6 @@ class TownRoutes:
             from babo.baton import offices
 
             return http_json_response(await asyncio.to_thread(lambda: offices.overview(_town())))
-        if got == "/api/town/guides":
-            from babo.baton import guides
-
-            return http_json_response({"guides": await asyncio.to_thread(lambda: guides.stats(_town()))})
         if got == "/api/town/eval":
             return http_json_response(await asyncio.to_thread(_eval_status))
         if not self.is_mutation_path(got):

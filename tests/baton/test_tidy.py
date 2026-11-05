@@ -11,29 +11,23 @@ from babo.baton.tidy import tidy
 from babo.baton.units import write_units
 
 
-def test_obsolete_settings_old_paths_and_the_rename_link_go(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    babo = home / ".babo"
+def test_obsolete_settings_and_old_backups_go(tmp_path: Path) -> None:
+    babo = tmp_path / "home" / ".babo"
     (babo / "baton" / "mayor").mkdir(parents=True)
-    (home / ".nanobot").symlink_to(".babo")
     config = {"channels": {"telegram": {"token": "${TG}"}},
-              "baton": {"generatedDir": f"{home}/.nanobot/baton", "night": {"time": "04:00", "toolTestTimeoutS": 60},
+              "baton": {"night": {"time": "04:00", "toolTestTimeoutS": 60},
                         "toolsets": {"mayor": ["read_file", "spawn"]}}}
     (babo / "config.json").write_text(json.dumps(config))
-    (babo / "baton" / "mayor" / "config.json").write_text(json.dumps({"agents": {"defaults": {"workspace": "~/.nanobot/w"}}}))
     for n in range(5):
         (babo / f"config.json.before-settings-2026010{n}-000000").write_text("{}")
 
-    said = tidy(babo_home=babo, user_home=home, checkout=None)
+    said = tidy(babo_home=babo, checkout=None)
     data = json.loads((babo / "config.json").read_text())
-    assert data["baton"]["generatedDir"] == f"{home}/.babo/baton"
     assert data["baton"]["night"] == {"toolTestTimeoutS": 60} and data["baton"]["toolsets"]["mayor"] == ["read_file"]
     assert data["channels"]["telegram"]["token"] == "${TG}"
-    assert json.loads((babo / "baton" / "mayor" / "config.json").read_text())["agents"]["defaults"]["workspace"] == "~/.babo/w"
-    assert not (home / ".nanobot").exists() and (babo / "config.json").exists()
     assert sorted(p.name for p in babo.glob("config.json.before-settings-*"))[0].endswith("20260102-000000")
-    assert any("~/.nanobot link" in line for line in said)
-    assert tidy(babo_home=babo, user_home=home, checkout=None) == []  # nothing left the second time
+    assert said
+    assert tidy(babo_home=babo, checkout=None) == []  # nothing left the second time
 
 
 def test_stale_folders_in_the_checkout_go_but_work_stays(tmp_path: Path) -> None:
@@ -42,14 +36,14 @@ def test_stale_folders_in_the_checkout_go_but_work_stays(tmp_path: Path) -> None
     (repo / "babo" / "app.py").write_text("x = 1\n")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    (repo / "nanobot" / "agent" / "__pycache__").mkdir(parents=True)
-    (repo / "nanobot" / "agent" / "__pycache__" / "loop.cpython-312.pyc").write_bytes(b"x")
+    (repo / "oldname" / "agent" / "__pycache__").mkdir(parents=True)
+    (repo / "oldname" / "agent" / "__pycache__" / "loop.cpython-312.pyc").write_bytes(b"x")
     (repo / "babo" / "__pycache__").mkdir()
     (repo / "babo" / "__pycache__" / "app.cpython-312.pyc").write_bytes(b"x")
     (repo / "notes").mkdir()
     (repo / "notes" / "mine.md").write_text("Robin's own notes")
-    said = tidy(babo_home=tmp_path / "none", user_home=tmp_path, checkout=repo)
-    assert not (repo / "nanobot").exists() and said == ["removed nanobot/ (only Python's cache of code that no longer exists)"]
+    said = tidy(babo_home=tmp_path / "none", checkout=repo)
+    assert not (repo / "oldname").exists() and said == ["removed oldname/ (only Python's cache of code that no longer exists)"]
     assert (repo / "babo" / "__pycache__").exists() and (repo / "notes" / "mine.md").exists()
 
 
@@ -74,6 +68,6 @@ def test_an_installs_copy_of_the_model_name_goes(tmp_path: Path) -> None:
     babo.mkdir()
     (babo / "config.json").write_text(json.dumps({"modelPresets": {"big": {"model": "big.gguf"}},
                                                   "baton": {"model": {"model": "/models/small.gguf", "slots": 1}}}))
-    said = tidy(babo_home=babo, user_home=tmp_path, checkout=None)
+    said = tidy(babo_home=babo, checkout=None)
     assert json.loads((babo / "config.json").read_text())["baton"]["model"] == {"slots": 1}
     assert any("baton.model.model" in line for line in said)

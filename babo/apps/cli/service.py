@@ -30,12 +30,9 @@ CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
 AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
-BABO_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
-BABO_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
 _CATALOG_SOURCES = (
     ("harness", CLI_ANYTHING_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
     ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
-    ("extensions", BABO_EXTENSION_REGISTRY_URL, BABO_EXTENSION_RAW_BASE, False),
 )
 
 _MAX_TOOL_OUTPUT_CHARS = 12_000
@@ -602,13 +599,10 @@ class CliAppManager:
         return True
 
     def _manifest_source(self, app: dict[str, Any]) -> str:
-        source = str(app.get("_source") or "harness")
-        if source == "extensions":
-            return "babo-extension"
-        return f"cli-anything:{source}"
+        return f"cli-anything:{app.get('_source') or 'harness'}"
 
     def _trust_registry(self, app: dict[str, Any]) -> str:
-        return "babo-extension" if str(app.get("_source") or "") == "extensions" else "cli-anything"
+        return "cli-anything"
 
     def get_app(self, name: str, *, force_refresh: bool = False) -> dict[str, Any]:
         wanted = name.lower()

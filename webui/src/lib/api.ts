@@ -1980,18 +1980,6 @@ export function runTownEval(transport: WebUIMutationTransport, preset: string, b
 }
 
 /** The guides Babo brings in when they're needed (`babo guides`). */
-export interface TownGuide {
-  name: string; title: string; when: string; tools: string[]; errors: string[]; offices: string[];
-  /** Words in a turn's message that bring it in (skills, mostly). */
-  keywords?: string[];
-  kind?: "guide" | "skill";
-  brought: number; opened: number; hint: string;
-}
-
-export function fetchTownGuides(token: string, base: string = ""): Promise<{ guides: TownGuide[] }> {
-  return request<{ guides: TownGuide[] }>(`${base}/api/town/guides`, token, undefined, API_READ_TIMEOUT_MS);
-}
-
 /** The town's work: rounds (`babo rounds`), and what Babo does itself. */
 export interface TownRoundStep {
   office: string; duty: string; material: string; fallback: string; holder: string;

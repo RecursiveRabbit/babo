@@ -47,7 +47,6 @@ residents/*/skills/
 residents/*/prompts/
 residents/*/projects/
 residents/*/.babo*/
-residents/*/.nanobot*/
 commons/projects/
 state/locks/
 state/tmp/

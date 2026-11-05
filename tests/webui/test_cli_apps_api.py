@@ -199,14 +199,14 @@ def _local_cli_apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     executable.write_text("fixture executable; never executed\n", encoding="utf-8")
     executable.chmod(0o755)
     manager = cli_service.CliAppManager(workspace=workspace)
-    for source in ("harness", "public", "extensions"):
+    for source in ("harness", "public"):
         rows = [
             {"name": "gimp", "display_name": "GIMP", "entry_point": "fixture-slow-cli",
              "package_manager": "bundled", "category": "image"},
             {"name": "other", "entry_point": "fixture-other-cli", "package_manager": "bundled"},
         ] if source == "harness" else []
         manager._cache_path(source).write_text(json.dumps({
-            "_cached_at": 0 if source == "extensions" else time.time(),
+            "_cached_at": 0 if source == "public" else time.time(),
             "data": {"meta": {"updated": "2026-10-17"}, "clis": rows},
         }), encoding="utf-8")
     manager._save_installed({

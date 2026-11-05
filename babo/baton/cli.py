@@ -295,7 +295,7 @@ def tidy(
 
     if config:
         _config(config)
-    said = do_tidy(babo_home=get_config_path().resolve().parent, user_home=Path.home(), checkout=checkout)
+    said = do_tidy(babo_home=get_config_path().resolve().parent, checkout=checkout)
     for line in said:
         console.print(f"- {line}")
     console.print("OK: tidy" + ("" if said else " (nothing left over)"))
