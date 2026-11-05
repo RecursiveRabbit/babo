@@ -93,4 +93,23 @@ describe("offices and moving in", () => {
     expect(within(card).getByText("Check the disks.", { exact: false })).toBeVisible();
     expect(within(card).getByRole("button", { name: "Move in" })).toBeVisible();
   });
+
+  it("asks only to acknowledge a resident moving away, with its reason and handover", async () => {
+    const leaving = { ...review, founding: [], leaving: [{ id: "2026-11-04-move_away-archivist.md", resident: "archivist", office: "archivist",
+      reason: "I'd like to rest.", handover: "Half the recipes are indexed.", keep: ["residents/archivist/knowledge/soil.md"], created: "" }] };
+    mocks.fetch.mockImplementation((url: string) => Promise.resolve(new Response(
+      JSON.stringify(url.endsWith("/api/town/rounds") ? rounds : url.endsWith("/api/town/review") ? leaving : town),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    mocks.mutation.mockResolvedValue({ message: "archivist has moved away.", town });
+    render(<TownPage onBackToChat={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Review (1)" }));
+    const card = (await screen.findByText("archivist (archivist) asks to move away")).closest(".settings-list-row") as HTMLElement;
+    expect(within(card).getByText("I'd like to rest.", { exact: false })).toBeVisible();
+    expect(within(card).getByText("Half the recipes are indexed.")).toBeVisible();
+    expect(within(card).getByText(/knowledge\/soil\.md/)).toBeVisible();
+    expect(within(card).queryByRole("button", { name: "Decline" })).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.decide",
+      expect.objectContaining({ kind: "move_away", id: "2026-11-04-move_away-archivist.md", yes: true }), expect.any(Number)));
+  });
 });

@@ -522,6 +522,20 @@ def review(config: str | None = _CONFIG_OPT):
             console.print(views.decide(t, "move_in", req.name, yes=choice == "yes", reason=_reason(), commit=False))
             decided += 1
 
+    from babo.baton import leaving
+
+    going = [leaving.describe(t, p) for p in leaving.open_requests(t)]
+    if going:
+        console.print(f"\n[bold]Moving away[/bold] ({len(going)}): you can't refuse these, only acknowledge them (talk it over first if you want).")
+    for item in going:
+        console.print(f"\n• {item['resident']} ({item['office']}) asks to move away: {escape(item['reason'])}")
+        console.print(f"  Its handover for the next {item['office']}:\n{escape(item['handover'][:1500])}")
+        if item["keep"]:
+            console.print(f"  Notes it wants kept for the town: {', '.join(item['keep'])}")
+        if typer.confirm("Acknowledge it now (it moves away)?", default=False):
+            console.print(views.decide(t, "move_away", item["id"], yes=True, reason=_reason(), commit=False))
+            decided += 1
+
     flags = growth.stale_flags(t)
     console.print(f"\n[bold]4. Flags open for over a week[/bold] ({len(flags)})")
     for flag in flags:
@@ -1395,6 +1409,69 @@ def projects_update(what: str = typer.Argument(..., help="A project (garden) or 
         if help_wanted is not None:
             change["help_wanted"] = help_wanted
     _board_change(config, change)
+
+
+square_app = typer.Typer(help="The town square: threads everyone starts and replies to.", invoke_without_command=True)
+app.add_typer(square_app, name="square")
+
+
+@square_app.callback()
+def square_list(ctx: typer.Context, closed: bool = typer.Option(False, "--closed", help="Closed threads too"),
+                config: str | None = _CONFIG_OPT):
+    """The open threads, newest first."""
+    from babo.baton import square
+
+    if ctx.invoked_subcommand:
+        return
+    t, _ = _town(config)
+    found = square.threads(t, include_closed=closed)
+    if not found:
+        console.print("The square is quiet: no open threads.")
+    for thread in found:
+        console.print(escape(thread.line()), highlight=False)
+
+
+def _square_change(config: str | None, change: dict[str, Any]) -> None:
+    from babo.baton import views
+
+    t, _ = _town(config)
+    try:
+        console.print(views.change_square(t, change))
+    except BatonError as exc:
+        _fail(exc)
+
+
+@square_app.command("show")
+def square_show(thread: str = typer.Argument(...), config: str | None = _CONFIG_OPT):
+    """One thread, with its replies."""
+    from babo.baton import square
+
+    t, _ = _town(config)
+    try:
+        console.print(escape(square.get(t, thread).full(last=50)), highlight=False)
+    except BatonError as exc:
+        _fail(exc)
+
+
+@square_app.command("post")
+def square_post(text: str = typer.Argument(...), kind: str = typer.Option("announcement", "--kind",
+                help="question, observation, flag or announcement"), title: str = typer.Option("", "--title"),
+                config: str | None = _CONFIG_OPT):
+    """Start a thread."""
+    _square_change(config, {"action": "post", "kind": kind, "title": title, "text": text})
+
+
+@square_app.command("reply")
+def square_reply(thread: str = typer.Argument(...), text: str = typer.Argument(...), config: str | None = _CONFIG_OPT):
+    """Reply to a thread."""
+    _square_change(config, {"action": "reply", "thread": thread, "text": text})
+
+
+@square_app.command("close")
+def square_close(thread: str = typer.Argument(...), text: str = typer.Option("", "--note", help="A last word"),
+                 config: str | None = _CONFIG_OPT):
+    """Close a thread."""
+    _square_change(config, {"action": "close", "thread": thread, "text": text})
 
 
 @app.command("now")

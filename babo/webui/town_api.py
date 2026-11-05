@@ -50,8 +50,9 @@ TOWN_MUTATION_PATHS = {
     "town.move_in": "/api/town/move-in",
     "town.move_away": "/api/town/move-away",
     "town.projects": "/api/town/projects/change",
+    "town.square": "/api/town/square/change",
 }
-_DECISION_KINDS = ("tool", "proposal", "move_in", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
+_DECISION_KINDS = ("tool", "proposal", "move_in", "move_away", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
 _doctor_lock = asyncio.Lock()
 
 
@@ -301,6 +302,10 @@ class TownRoutes:
             from babo.baton import tasks
 
             return http_json_response({"lists": await asyncio.to_thread(lambda: [tasks.overview(x) for x in tasks.all_lists(_town()) if x.open])})
+        if got == "/api/town/square":
+            from babo.baton import square
+
+            return http_json_response(await asyncio.to_thread(lambda: square.overview(_town())))
         if got == "/api/town/projects":
             from babo.baton import projects
 
@@ -323,7 +328,7 @@ class TownRoutes:
         if got == "/api/town/decide":
             kind = payload.get("kind")
             if kind not in _DECISION_KINDS:
-                raise BatonError("kind must be tool, proposal, move_in, flag or errand")
+                raise BatonError("kind must be tool, proposal, move_in, move_away, flag or errand")
             yes = payload.get("yes")
             if not isinstance(yes, bool):
                 raise BatonError("missing yes")
@@ -415,6 +420,11 @@ class TownRoutes:
                 _town(), office, role=role, why=why,
                 profile={str(k): str(v) for k, v in cast(dict[object, object], profile).items()} if profile else None,
                 joins=cast(list[dict[str, object]], joins) if joins else None))
+        elif got == "/api/town/square/change":
+            from babo.baton import square
+
+            said = await asyncio.to_thread(lambda: views.change_square(_town(), payload))
+            return http_json_response({"message": said, "square": await asyncio.to_thread(lambda: square.overview(_town()))})
         elif got == "/api/town/projects/change":
             from babo.baton import projects
 

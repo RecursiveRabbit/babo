@@ -18,6 +18,7 @@ import { TasksPanel } from "@/components/town/TasksPanel";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { ActivityView } from "@/components/town/ActivityView";
 import { ProjectsView } from "@/components/town/ProjectsView";
+import { SquareView } from "@/components/town/SquareView";
 import { useClient } from "@/providers/ClientProvider";
 import {
   decideTownItem,
@@ -51,7 +52,7 @@ import {
 import { cn } from "@/lib/utils";
 import "./town.css";
 
-type TownTab = "town" | "sessions" | "projects" | "rounds" | "activity" | "review" | "profiles" | "doctor" | "settings";
+type TownTab = "town" | "sessions" | "square" | "projects" | "rounds" | "activity" | "review" | "profiles" | "doctor" | "settings";
 
 function errorText(reason: unknown): string {
   return reason instanceof Error && reason.message ? reason.message : String(reason);
@@ -122,6 +123,7 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
             options={[
               { value: "town", label: t("town.tab.town", { defaultValue: "Residents" }) },
               { value: "sessions", label: t("town.tab.sessions", { defaultValue: "Sessions" }) },
+              { value: "square", label: t("town.tab.square", { defaultValue: "Square" }) },
               { value: "projects", label: t("town.tab.projects", { defaultValue: "Projects" }) },
               { value: "rounds", label: t("town.tab.rounds", { defaultValue: "Rounds" }) },
               { value: "activity", label: t("town.tab.activity", { defaultValue: "Activity" }) },
@@ -135,6 +137,7 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
           {tab === "town" && <ResidentsView town={town} onChanged={changed} onError={setError} transport={client} />}
           {tab === "review" && <ReviewView token={getToken} transport={client} onChanged={changed} onError={setError} />}
           {tab === "sessions" && <SessionsView focus={focus} token={getToken} transport={client} onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
+          {tab === "square" && <SquareView onError={setError} />}
           {tab === "projects" && <ProjectsView onError={setError}
             residents={(town?.residents ?? []).filter((r) => r.status === "active").map((r) => r.id)} />}
           {tab === "activity" && <ActivityView onError={setError} />}
@@ -327,7 +330,8 @@ function ReviewView({ token, transport, onChanged, onError }: {
   };
 
   if (!review) return <p className="settings-list-inset text-[13px] text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />{t("town.loading", { defaultValue: "Loading the town…" })}</p>;
-  const empty = !review.sessions.length && !review.tools.length && !review.proposals.length && !review.founding.length && !review.flags.length;
+  const leaving = review.leaving ?? [];
+  const empty = !review.sessions.length && !review.tools.length && !review.proposals.length && !review.founding.length && !review.flags.length && !leaving.length;
   return <>
     <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
       {t("town.reviewIntro", { defaultValue: "Nothing changes unless you decide. Whatever reason you give goes to the resident concerned. This is not an audit of anyone's memory." })}
@@ -393,6 +397,16 @@ function ReviewView({ token, transport, onChanged, onError }: {
         {f.joins && f.joins.length > 0 && <ul className="mt-1 text-xs">
           {f.joins.map((j, i) => <li key={i}><span className="font-medium">{j.round}</span>: {j.duty}</li>)}
         </ul>}
+      </DecisionCard>)}
+    </ReviewSection>}
+    {leaving.length > 0 && <ReviewSection title={t("town.review.leaving", { defaultValue: "Moving away" })}>
+      {leaving.map((l) => <DecisionCard key={l.id} kind="move_away" id={l.id} onDecide={decide}
+        heading={t("town.leavingHeading", { defaultValue: "{{who}} ({{office}}) asks to move away", who: l.resident, office: l.office })}
+        yes={t("town.acknowledge", { defaultValue: "Acknowledge" })} no={null} reasonLabel={t("town.noteOptional", { defaultValue: "Note (optional)" })}
+        note={t("town.leavingNote", { defaultValue: "You can't refuse this, only acknowledge it; talk it over with them in a session first if you want to. Its folder and memory stay in the town, and its office becomes a vacancy." })}>
+        <p className="text-[13px]"><span className="font-medium">{t("town.why", { defaultValue: "Why:" })}</span> {l.reason}</p>
+        <Expandable label={t("town.handover", { defaultValue: "Its handover for the next {{office}}", office: l.office })} text={l.handover} open />
+        {l.keep.length > 0 && <p className="mt-1 text-xs"><span className="font-medium">{t("town.keepsForTown", { defaultValue: "Notes it wants kept for the town:" })}</span> {l.keep.join(", ")}</p>}
       </DecisionCard>)}
     </ReviewSection>}
     {review.flags.length > 0 && <ReviewSection title={t("town.review.flags", { defaultValue: "Flags open for over a week" })}>

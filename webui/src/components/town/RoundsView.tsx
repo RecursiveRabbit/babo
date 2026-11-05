@@ -118,8 +118,14 @@ function RoundCard({ round, busy, onRun, onSet, onRehearse, onApprove, onAccess 
             <span className={cn("ml-1.5 text-xs", step.holder ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400")}>
               {step.holder ? (step.holder !== step.office ? `(${step.holder})` : "") : t("town.vacancy", { defaultValue: "vacancy: waits until someone moves in" })}
             </span>
-            {ran && <span className="ml-1.5 text-xs text-muted-foreground">· {ran.status}{ran.note ? `: ${ran.note}` : ""}</span>}
+            {ran && <span className={cn("ml-1.5 text-xs", ran.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
+              · {ran.status}{ran.note ? `: ${ran.note}` : ""}{(ran.tries ?? 1) > 1 ? ` ${t("town.triedTwice", { defaultValue: "(tried twice)" })}` : ""}
+            </span>}
           </span>
+          {ran?.refused && ran.refused.length > 0 && <p role="note" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            {t("town.stepRefused", { defaultValue: "It was refused:" })} {ran.refused.map((r) => `${r.tool} ${r.what}`.trim()).join("; ")}.{" "}
+            {t("town.stepRefusedHow", { defaultValue: "Rehearse the round to see what it needs, or give the step that access below." })}
+          </p>}
           <span className="mt-0.5 block text-xs text-muted-foreground">{step.duty}</span>
           {ran?.report && <details className="mt-1"><summary className="cursor-pointer text-xs text-muted-foreground">{t("town.roundReport", { defaultValue: "Its report" })}</summary>
             <p className="mt-1 whitespace-pre-wrap text-xs">{ran.report}</p></details>}

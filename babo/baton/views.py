@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from babo.baton import gitops, growth
+from babo.baton import gitops, growth, leaving
 from babo.baton.config import BatonConfig
 from babo.baton.founding import founding_requests
 from babo.baton.inbox import unread
@@ -21,7 +21,7 @@ from babo.baton.town import OWNER, BatonError, Town
 if TYPE_CHECKING:
     from babo.config.schema import Config
 
-DecisionKind = Literal["tool", "proposal", "move_in", "flag", "errand", "founding", "session"]  # the last two: old names (step 28)
+DecisionKind = Literal["tool", "proposal", "move_in", "move_away", "flag", "errand", "founding", "session"]  # the last two: old names (step 28)
 
 
 def town_overview(town: Town, cfg: BatonConfig) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def pending_counts(town: Town) -> dict[str, int]:
     return {
         "tools": len(growth.pending_tools(town)), "proposals": len(growth.open_proposals(town)),
         "founding": len(founding_requests(town)), "flags": len(growth.stale_flags(town)),
-        "sessions": len(_requests().pending(town)),
+        "sessions": len(_requests().pending(town)), "leaving": len(leaving.open_requests(town)),
     }
 
 
@@ -176,7 +176,9 @@ def review_items(town: Town, config: Config | None = None) -> dict[str, Any]:
     recent = [{"id": r.id, "resident": r.resident, "task": first_line(r.task, 140), "status": r.status,
                "decided": r.decided, "decided_by": r.decided_by, "commands": r.commands, "access": r.access,
                "result": first_line(r.result, 300)} for r in _requests().recent(town)]
-    return {"sessions": sessions, "recent": recent, "tools": tools, "proposals": proposals, "founding": founding, "flags": flags}
+    leaving_items = [leaving.describe(town, p) for p in leaving.open_requests(town)]
+    return {"sessions": sessions, "recent": recent, "tools": tools, "proposals": proposals, "founding": founding, "flags": flags,
+            "leaving": leaving_items}
 
 
 def mayor_chats(town: Town, *, limit: int = 10) -> list[dict[str, str]]:
@@ -213,6 +215,10 @@ def decide(town: Town, kind: DecisionKind, item_id: str, *, yes: bool, reason: s
     elif kind == "move_in":
         new_id = growth.decide_founding(town, _child(town.board, item_id), approve=yes, reason=reason)
         result = f"Moved in: {new_id}." if new_id else "Move-in request declined."
+    elif kind == "move_away":
+        if not yes:
+            raise BatonError("A resident's move away can't be refused, only acknowledged. Talk it over with them first if you want to.")
+        result = leaving.acknowledge(town, _child(town.board, item_id), note=reason if reason != "(no reason given)" else "")
     elif kind == "flag":
         if not yes:
             return "Flag kept open."
@@ -585,3 +591,23 @@ def change_project_board(town: Town, change: dict[str, Any]) -> str:
                                    assignee=resident("assignee"))
         return f"Updated {t.ref}."
     raise BatonError("action is one of: new_project, update_project, new_ticket, update_ticket")
+
+
+def change_square(town: Town, change: dict[str, Any]) -> str:
+    """The owner on the town square (the Square tab, ``babo square``): post, reply or close, as the owner."""
+    from babo.baton import square
+
+    def text(key: str, limit: int = 4000) -> str:
+        value = change.get(key, "")
+        if not isinstance(value, str) or len(value) > limit:
+            raise BatonError(f"{key} is text, at most {limit} characters")
+        return value.strip()
+
+    action = text("action", 20)
+    if action == "post":
+        return f"Posted: {square.post(town, OWNER, text('kind', 20), text('title', 200), text('text')).id}."
+    if action == "reply":
+        return f"Replied on {square.reply(town, OWNER, text('thread', 120), text('text', 2000)).id}."
+    if action == "close":
+        return f"Closed {square.close(town, OWNER, text('thread', 120), text('text', 2000)).id}."
+    raise BatonError("action is one of: post, reply, close")

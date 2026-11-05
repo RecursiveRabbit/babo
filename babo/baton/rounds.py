@@ -15,10 +15,11 @@ going from house to house. Each is a readable file in the town
       - office: archivist
         or: mayor               # who does it while the office is vacant (optional)
         duty: Curate the notes waiting in the queue into the commons.
-        material: promotions    # what Babo gathers for it: promotions | inspection | tickets | previous | none
+        material: promotions    # what Babo gathers for it: promotions | inspection | tickets | square | previous | none
       - office: inspector
         duty: Review pending tools, open proposals and today's changes.
         material: inspection
+        on_failure: go_on       # stop (the default: the round waits for its next run) or go_on
     ---
     What the round is for, in a few words (for people and for the Mayor).
 
@@ -34,6 +35,7 @@ keeps the record (``state/rounds/``); the residents do the work.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -49,7 +51,7 @@ from babo.baton.town import BatonError, Town, atomic_write, now_iso
 ROUNDS_DIR = "rounds"
 MARK = "[From Babo: a round]"
 EVENTS = {"checkpoint": "a checkpoint is filed", "session-wrapped-up": "a session wraps up", "proposal": "a proposal is filed"}
-MATERIALS = ("none", "previous", "promotions", "inspection", "tickets")
+MATERIALS = ("none", "previous", "promotions", "inspection", "tickets", "square")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
@@ -63,6 +65,7 @@ class Step:
     # and exact shell commands it may run. Approving the round approves exactly these.
     access: dict[str, str] = field(default_factory=lambda: cast(dict[str, str], {}))
     commands: tuple[str, ...] = ()
+    go_on: bool = False  # ``on_failure: go_on``: if it fails, the round carries on with the next step
 
     def who(self, town: Town) -> str:
         return holder(town, self.office) or (holder(town, self.fallback) if self.fallback else "")
@@ -184,8 +187,11 @@ def parse(name: str, text: str) -> Round:
             raise RoundError("each step has an office and a duty")
         if material not in MATERIALS:
             raise RoundError(f"`material` is one of: {', '.join(MATERIALS)}")
+        on_failure = str(step.get("on_failure") or "stop").strip().lower().replace(" ", "_")
+        if on_failure not in ("stop", "go_on"):
+            raise RoundError("`on_failure` is stop (the default: the round waits for the next time) or go_on")
         steps.append(Step(office, duty, material, str(step.get("or") or "").strip(),
-                          _access(step.get("access")), _commands(step.get("commands"))))
+                          _access(step.get("access")), _commands(step.get("commands")), on_failure == "go_on"))
     if not steps:
         raise RoundError("a round has at least one step")
     runs = str(meta.get("runs") or "wait")
@@ -326,6 +332,12 @@ def waiting(town: Town, step: Step) -> str:
         resident = step.who(town)
         count = len(projects.open_tickets_for(town, resident)) if resident else 0
         return f"{count} open ticket(s)" if count else ""
+    if step.material == "square":
+        from babo.baton import square
+
+        resident = step.who(town)
+        count = len(square.new_for(town, resident)) if resident else 0
+        return f"{count} new thread(s) on the square" if count else ""
     return ""
 
 
@@ -461,6 +473,8 @@ class StepRun:
     status: str = ""  # done | skipped | failed
     note: str = ""
     report: str = ""
+    refused: list[dict[str, str]] = field(default_factory=lambda: cast(list[dict[str, str]], []))  # {tool, what}
+    tries: int = 0
 
 
 @dataclass
@@ -498,6 +512,11 @@ async def run(ctx: Context, r: Round, *, trigger: str, session_key: str,
             from babo.baton import projects
 
             material = projects.tickets_material(ctx.town, resident)
+        elif step.material == "square":
+            from babo.baton import square
+
+            material = square.material(ctx.town, resident)
+            after = lambda who=resident: square.mark_seen(ctx.town, who)  # noqa: E731
         elif step.material == "previous":
             material = f"What the step before reported:\n\n{previous}" if previous else ""
         else:
@@ -508,18 +527,42 @@ async def run(ctx: Context, r: Round, *, trigger: str, session_key: str,
         message = (f"{MARK} {r.title}, step {index} of {len(r.steps)} ({now_iso()}). Your duty: {step.duty}"
                    + ("" if material == "-" else f"\n\n{material}")
                    + "\n\nWhen you're done, say in a few lines what you did; it's the report the next step and the owner see.")
-        try:
-            report = await ctx.agent_turn(resident, message, session_key, f"round:{r.name}:{index}", dict(step.access), list(step.commands))
-        except Exception as exc:  # the owner hears; the rest of the round waits for the next time
-            record.steps.append(StepRun(step.office, resident, "failed", f"{type(exc).__name__}: {exc}"))
+        tries, failure, report = 0, "", None
+        while True:
+            tries += 1
+            try:
+                report = await ctx.agent_turn(resident, message, session_key, f"round:{r.name}:{index}", dict(step.access), list(step.commands))
+                break
+            except Exception as exc:
+                if tries == 1 and passing(exc):  # the model server away for a moment, a timeout: once more
+                    ctx.log(f"round {r.name}: step {index} ({resident}) failed ({first_line(str(exc), 120)}); trying once more")
+                    await asyncio.sleep(RETRY_AFTER_S)
+                    continue
+                failure = f"{type(exc).__name__}: {exc}"
+                break
+        if report is None:
+            ran = StepRun(step.office, resident, "failed", failure, tries=tries)
+            record.steps.append(ran)
+            what = "went on without it" if step.go_on else "stopped there"
+            notices.add(ctx.town, "round_failed", f"The round “{r.title}”, step {index} ({resident}), didn't go through"
+                        f"{' (tried twice)' if tries > 1 else ''}: {first_line(failure, 160)}. The round {what}.", resident=resident)
+            _tell_mayor(ctx.town, r, index, ran, what)
+            ctx.log(f"round {r.name}: step {index} ({resident}) failed: {failure}")
+            if step.go_on:
+                record.status = "failed"
+                continue
             record.status = "failed"
-            notices.add(ctx.town, "round_failed", f"The round “{r.title}” stopped at step {index} ({resident}): {first_line(str(exc), 160)}",
-                        resident=resident)
-            ctx.log(f"round {r.name}: step {index} ({resident}) failed: {exc}")
             break
         after()
         previous = report.strip()
-        record.steps.append(StepRun(step.office, resident, "done", report=previous[:4000]))
+        refused = list(getattr(report, "refused", []) or [])
+        ran = StepRun(step.office, resident, "done", report=previous[:4000], refused=refused, tries=tries)
+        record.steps.append(ran)
+        if refused:
+            listed = "; ".join(f"{x['tool']} {x['what']}".strip() for x in refused[:5])
+            notices.add(ctx.town, "round_refused", f"In the round “{r.title}”, step {index} ({resident}) was refused: {listed}. "
+                        "Rehearse the round to see what it needs, or give the step that access in its round.", resident=resident)
+            _tell_mayor(ctx.town, r, index, ran, "carried on")
         if mark is not None:
             mark(key, {"resident": resident})
         ctx.log(f"round {r.name}: step {index} ({resident}): {first_line(previous, 120)}")
@@ -527,6 +570,39 @@ async def run(ctx: Context, r: Round, *, trigger: str, session_key: str,
     record.status = record.status or "done"
     _record(ctx.town, record)
     return record
+
+
+RETRY_AFTER_S = 30.0
+_PASSING = ("timed out", "timeout", "unreachable", "not reachable", "wasn't reachable", "connection refused", "connecterror", "connection reset",
+            "didn't finish its turn within", "server disconnected", "503", "502", "temporarily")
+
+
+def passing(exc: BaseException) -> bool:
+    """A failure that's likely to pass (the model server away for a moment, a timeout): worth one more try.
+    A refusal never is."""
+    import httpx
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError, TimeoutError, ConnectionError)):
+        return True
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "permission" not in text and any(word in text for word in _PASSING)
+
+
+def _tell_mayor(town: Town, r: Round, index: int, ran: StepRun, what: str) -> None:
+    """The Mayor hears of a step that failed or was refused, by letter, to route the work or propose a change."""
+    from babo.baton.inbox import deliver
+
+    mayor = next((x.id for x in Registry(town).all() if x.office == "mayor" and x.status == "active"), "")
+    if not mayor or mayor == ran.resident and ran.status == "done":
+        return
+    if ran.status == "failed":
+        said = f"Step {index} of the round “{r.title}” ({ran.resident}, the {ran.office}) didn't go through: {ran.note}. The round {what}."
+    else:
+        said = (f"In the round “{r.title}”, step {index} ({ran.resident}, the {ran.office}) was refused: "
+                + "; ".join(f"{x['tool']} {x['what']}".strip() for x in ran.refused[:5]) + ".")
+    deliver(town, mayor, kind="note", sender="babo", subject=f"The round “{r.title}”, step {index}",
+            text=said + "\n\nIf the work should go elsewhere, route it (a letter, an errand); if the round needs other "
+                        "access or another step, propose the change (propose_change with round). The owner has a notice too.")
 
 
 def _record(town: Town, record: RoundRun) -> None:

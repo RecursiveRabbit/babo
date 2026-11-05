@@ -26,6 +26,14 @@ def _isolated_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+@pytest.fixture(autouse=True)
+def _no_wait_before_a_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round step that failed in a passing way is tried once more after a while; not in tests."""
+    from babo.baton import rounds
+
+    monkeypatch.setattr(rounds, "RETRY_AFTER_S", 0.0)
+
+
 @pytest.fixture
 def town(tmp_path: Path) -> Town:
     # Most tests need the Archivist and the Inspector too; a new town has only the Mayor.

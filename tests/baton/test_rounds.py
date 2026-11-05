@@ -82,7 +82,59 @@ def test_a_step_that_fails_stops_the_round_and_the_owner_hears(town: Town) -> No
     record = asyncio.run(rounds.run(Ctx(town, fail="archivist"), rounds.get(town, "paper"), trigger="by hand", session_key="t"))
     assert record.status == "failed" and len(record.steps) == 1
     [note] = [n for n in notices.recent(town) if n["kind"] == "round_failed"]
-    assert "“The paper round” stopped at step 1 (archivist)" in note["text"]
+    assert "“The paper round”, step 1 (archivist), didn't go through (tried twice)" in note["text"] and "stopped there" in note["text"]
+    assert record.steps[0].tries == 2  # the model wasn't reachable: likely passing, so once more
+
+
+class Refusing(Ctx):
+    async def agent_turn(self, resident: str, message: str, session_key: str, kind: str = "upkeep",
+                         access: dict[str, str] | None = None, commands: list[str] | None = None) -> str:
+        from babo.baton.opencode import Turn
+
+        self.turns.append((resident, message))
+        if resident == "archivist":
+            return Turn("I couldn't check the disk.", [{"tool": "shell", "what": "df -h"}])
+        if resident == "inspector" and self.fail == "refuse-inspector":
+            raise RuntimeError("Permission denied: shell")
+        return f"{resident} did its part."
+
+
+def test_what_a_step_was_refused_is_recorded_and_the_owner_and_the_mayor_hear(town: Town) -> None:
+    from babo.baton.inbox import unread
+
+    _write(town, "paper", PAPER)
+    record = asyncio.run(rounds.run(Refusing(town), rounds.get(town, "paper"), trigger="t", session_key="t"))
+    assert record.status == "done" and record.steps[0].refused == [{"tool": "shell", "what": "df -h"}]
+    [note] = [n for n in notices.recent(town) if n["kind"] == "round_refused"]
+    assert "step 1 (archivist) was refused: shell df -h" in note["text"] and "Rehearse the round" in note["text"]
+    [letter] = [i for i in unread(town, "mayor") if "was refused" in i.body]
+    assert "propose_change with round" in letter.body
+    [run] = rounds.runs(town, "paper")
+    assert run["steps"][0]["refused"] == [{"tool": "shell", "what": "df -h"}]
+
+
+def test_a_refusal_is_never_retried_and_a_step_can_let_the_round_go_on(town: Town) -> None:
+    _write(town, "paper", PAPER.replace("    duty: Check the draft for anything private.\n",
+                                        "    duty: Check the draft for anything private.\n    on_failure: go_on\n").replace(
+        "  - office: reporter\n    duty: Draft the next edition from the step before.\n    material: previous\n", ""))
+    _write(town, "paper", (rounds.folder(town) / "paper.md").read_text(encoding="utf-8").replace(
+        "steps:\n", "steps:\n  - office: inspector\n    duty: Look first.\n    on_failure: go_on\n", 1))
+    ctx = Refusing(town, fail="refuse-inspector")
+    record = asyncio.run(rounds.run(ctx, rounds.get(town, "paper"), trigger="t", session_key="t"))
+    assert [(s.office, s.status, s.tries) for s in record.steps] == [("inspector", "failed", 1), ("archivist", "done", 1),
+                                                                    ("inspector", "failed", 1)]
+    assert record.status == "failed" and "went on without it" in notices.recent(town)[-1]["text"]
+    with pytest.raises(rounds.RoundError, match="on_failure"):
+        rounds.parse("x", "---\ntitle: X\nsteps:\n  - office: mayor\n    duty: d\n    on_failure: maybe\n---\n")
+
+
+def test_which_failures_are_worth_one_more_try() -> None:
+    import httpx
+
+    assert rounds.passing(httpx.ConnectError("Connection refused"))
+    assert rounds.passing(RuntimeError("archivist didn't finish its turn within 1800 seconds."))
+    assert not rounds.passing(RuntimeError("Permission denied: shell"))
+    assert not rounds.passing(ValueError("bad round"))
 
 
 def test_the_mayor_curates_while_there_is_no_archivist(town: Town) -> None:

@@ -120,6 +120,25 @@ TOOL_SPECS: dict[str, ToolSpec] = {
              "required": ["action"]},
         ),
         ToolSpec(
+            "town_square",
+            "The town square, open to everyone: threads (a question, an observation, a flag, an announcement) with replies. "
+            "action: read (the open threads, or one with thread), post (kind, title, text), reply (thread, text), close (your "
+            "thread; the Mayor closes any). Letters stay for one-to-one. The Mayor also posts for the owner here: kind "
+            "open_role, request, or move_in_request (with office, and profile and joins).",
+            {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["read", "post", "reply", "close"], "description": "Default: post."},
+                "kind": {"type": "string", "enum": ["question", "observation", "flag", "announcement", *BOARD_KINDS]},
+                "title": _str("post: in a few words."),
+                "text": _str("post: the thread. reply: your reply. close: optional, a last word."),
+                "thread": _str("read, reply, close: the thread (as the square lists it)."),
+                "office": _str("The Mayor's move_in_request: a short office name, e.g. gardener."),
+                "profile": {"type": "object", "description": "The Mayor's move_in_request: access beyond a new resident's, e.g. "
+                            "{shell: ask, read: town} (files, shell, subagents, web_fetch, web_search, image_generation: allow|ask|deny)."},
+                "joins": {"type": "array", "items": {"type": "object"}, "description": "The Mayor's move_in_request: rounds it joins, "
+                          "each {round, duty, material?: previous}; a new round also needs when, e.g. {daily: '07:00'}."}},
+             "required": []},
+        ),
+        ToolSpec(
             "revise_self",
             "Rewrite your SELF.md (your own words about yourself). Optionally record a name you have chosen.",
             {
@@ -153,7 +172,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         ToolSpec(
             "propose_change",
-            "Propose a change to how the town or the harness works. The owner accepts or declines with a reason.",
+            "Propose a change to how the town or the harness works. The owner accepts or declines with a reason. "
+            "To move away from the town yourself: move_away, with why (rationale), a handover for whoever takes your "
+            "office next (description), and the notes worth keeping for the commons (keep); the owner acknowledges it.",
             {
                 "type": "object",
                 "properties": {
@@ -165,27 +186,11 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                     "round": _str("Optional: a round (rounds/<name>.md) to add, change or remove."),
                     "round_text": _str("With round: the whole file as it should be (title, when, steps with office and duty)."),
                     "remove_round": {"type": "boolean", "description": "With round: remove it."},
+                    "move_away": {"type": "boolean", "description": "You're asking to move away (see above)."},
+                    "keep": _list("With move_away: your notes worth keeping for the town, e.g. knowledge/soil.md."),
                 },
                 "required": ["title", "rationale", "description"],
             },
-        ),
-        ToolSpec(
-            "post_board",
-            "Post to the town notice board: an open role, a request, or a move-in request for a newcomer (the owner approves).",
-            {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": list(BOARD_KINDS)},
-                    "text": _str("The post. For a move-in request, describe the office and why it is needed."),
-                    "office": _str("For a move-in request: short office name, e.g. gardener (an existing office, or a new one)."),
-                    "profile": {"type": "object", "description": "For a move-in request: access beyond a new resident's, e.g. "
-                                "{shell: ask, read: town} (files, shell, subagents, web_fetch, web_search, image_generation: allow|ask|deny)."},
-                    "joins": {"type": "array", "items": {"type": "object"}, "description": "For a move-in request: rounds it joins, each "
-                              "{round, duty, material?: previous}; a new round also needs when, e.g. {daily: '07:00'}."},
-                },
-                "required": ["kind", "text"],
-            },
-            offices=("mayor",),
         ),
         ToolSpec(
             "send_errand",
@@ -512,7 +517,14 @@ class Toolbox:
         return f"Proposed tool {name}. It will be tested in isolation, reviewed by the Inspector, and then goes to {self.town.owner_name}."
 
     def propose_change(self, title: str, rationale: str, description: str, project: str | None = None, town_name: str | None = None,
-                       round: str | None = None, round_text: str | None = None, remove_round: bool = False) -> str:
+                       round: str | None = None, round_text: str | None = None, remove_round: bool = False,
+                       move_away: bool = False, keep: list[str] | None = None) -> str:
+        if move_away:
+            from babo.baton import leaving
+
+            leaving.request(self.town, self.resident_id, reason=rationale, handover=description, keep=keep)
+            return (f"Your request to move away is with {self.town.owner_name}, who acknowledges it (and may want to talk it "
+                    "over first). Until then you're here as usual; your folder and memory stay in the town after you go.")
         town_name = " ".join((town_name or "").split())
         if len(town_name) > 60:
             raise BatonError("Not filed: a town name is at most 60 characters. Shorten it and propose again.")
@@ -551,12 +563,38 @@ class Toolbox:
         atomic_write(path, join_frontmatter(meta, body))
         return f"Proposal filed as {self.scope.display(path)}. {self.town.owner_name} will accept or decline it with a reason."
 
+    def town_square(self, action: str = "post", kind: str = "", text: str = "", title: str = "", thread: str = "",
+                    office: str | None = None, profile: dict[str, object] | None = None,
+                    joins: list[dict[str, object]] | None = None) -> str:
+        from babo.baton import square
+
+        me = self.resident_id
+        action = (action or "post").strip().lower()
+        if action == "read":
+            return square.read_text(self.town, me, thread)
+        if action == "reply":
+            if not thread:
+                raise BatonError("Which thread? Give thread, as the square lists it (action read).")
+            t = square.reply(self.town, me, thread, text)
+            return f"Replied on {t.id}."
+        if action == "close":
+            t = square.close(self.town, me, thread, text)
+            return f"Closed {t.id}."
+        if action != "post":
+            raise BatonError("action is one of: read, post, reply, close.")
+        kind = aliases.board_kind((kind or "").strip().lower())
+        if kind in BOARD_KINDS:
+            self._require_office("mayor")
+            return self._post_for_owner(kind, text, office, profile, joins)
+        if not kind:
+            raise BatonError(f"Give the thread's kind: {', '.join(square.KINDS)}.")
+        t = square.post(self.town, me, kind, title, text)
+        return f"Posted on the square: {t.line()}. Replies come to the thread; you'll see them with where you are now."
+
     # -- mayor -----------------------------------------------------------
-    def post_board(self, kind: str, text: str, office: str | None = None, profile: dict[str, object] | None = None,
-                   joins: list[dict[str, object]] | None = None) -> str:
-        kind = aliases.board_kind(kind)
-        if kind not in BOARD_KINDS:
-            raise BatonError(f"kind must be one of {', '.join(BOARD_KINDS)}. Use one of those and post again.")
+    def _post_for_owner(self, kind: str, text: str, office: str | None = None, profile: dict[str, object] | None = None,
+                        joins: list[dict[str, object]] | None = None) -> str:
+        """An open role, a request, or a move-in request: on the notice board, for the owner."""
         meta: dict[str, object] = {"kind": kind, "author": self.resident_id, "created": now_iso(), "status": "open"}
         if kind == "move_in_request":
             if not office or not office.strip():

@@ -16,7 +16,7 @@ from loguru import logger
 
 GOING = "step 28"
 
-TOOLS = {"request_session": "send_errand"}
+TOOLS = {"request_session": "send_errand", "post_board": "town_square"}
 BOARD_KINDS = {"founding_request": "move_in_request"}
 DECISIONS = {"founding": "move_in", "session": "errand"}
 API_PATHS = {"/api/town/session-requests": "/api/town/errands"}

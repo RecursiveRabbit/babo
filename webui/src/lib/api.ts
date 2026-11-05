@@ -1556,7 +1556,7 @@ export interface TownOverview {
   root: string;
   residents: TownResident[];
   board: { kind: string; author: string; created: string; text: string }[];
-  pending: { tools: number; proposals: number; founding: number; flags: number; sessions: number };
+  pending: { tools: number; proposals: number; founding: number; flags: number; sessions: number; leaving?: number };
   last_upkeep: { pass: string; finished: boolean; steps: string[]; log: string } | null;
   upkeep: TownUpkeep;
   offices?: TownOffices;
@@ -1620,6 +1620,22 @@ export function moveInToTown(transport: WebUIMutationTransport, move: {
   return mutation<TownChange>(transport, "town.move_in", move);
 }
 
+/** The town square: threads everyone starts and replies to. Same as `babo square`. */
+export interface TownThread {
+  id: string; kind: string; title: string; author: string; text: string; status: string;
+  created: string; updated: string; closed_by: string; replies: { at: string; by: string; text: string }[];
+}
+export interface TownSquare { threads: TownThread[]; kinds: string[] }
+
+export function fetchTownSquare(token: string, base: string = ""): Promise<TownSquare> {
+  return request<TownSquare>(`${base}/api/town/square`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** The owner on the square: post (kind, title, text), reply (thread, text) or close (thread). */
+export function changeSquare(transport: WebUIMutationTransport, change: Record<string, string>): Promise<{ message: string; square: TownSquare }> {
+  return mutation<{ message: string; square: TownSquare }>(transport, "town.square", change);
+}
+
 /** The projects board: projects with a lead and a status, and their tickets. Same as `babo projects`. */
 export interface TownTicket {
   ref: string; project: string; number: number; title: string; status: string; assignee: string;
@@ -1661,7 +1677,7 @@ export function requestTownUpkeep(transport: WebUIMutationTransport): Promise<To
   return mutation<TownChange>(transport, "town.upkeep", {});
 }
 
-export type TownDecisionKind = "tool" | "proposal" | "founding" | "flag" | "session";
+export type TownDecisionKind = "tool" | "proposal" | "founding" | "move_away" | "flag" | "session";
 
 /** A session the Mayor asked for: shown word for word; approving runs it with exactly this access. */
 export interface TownSessionRequest {
@@ -1703,6 +1719,8 @@ export interface TownReview {
   }[];
   founding: { id: string; office: string; author: string; body: string; profile?: Record<string, string>; joins?: TownJoin[] }[];
   flags: { id: string; to: string; by: string; at: string; claim: string }[];
+  /** Residents asking to move away: acknowledged, never refused (older Babo: absent). */
+  leaving?: { id: string; resident: string; office: string; reason: string; handover: string; keep: string[]; created: string }[];
 }
 
 export interface TownDoctorReport {
@@ -1959,7 +1977,9 @@ export interface TownRehearsal {
 }
 export interface TownRoundRun {
   round: string; trigger: string; started: string; finished: string; status: string;
-  steps: { office: string; resident: string; status: string; note: string; report: string }[];
+  steps: { office: string; resident: string; status: string; note: string; report: string;
+    /** What it was refused (older Babo: absent), and how many times it was tried. */
+    refused?: { tool: string; what: string }[]; tries?: number }[];
 }
 export interface TownRound {
   name: string; title: string; about: string; when: string; runs: "wait" | "now"; enabled: boolean;
