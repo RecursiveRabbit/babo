@@ -132,7 +132,6 @@ def _seed_catalog(manager: CliAppManager) -> None:
     }
     _write_cache(manager._cache_path("harness"), harness)
     _write_cache(manager._cache_path("public"), public)
-    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
 
 
 def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -> None:
@@ -199,7 +198,6 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
             ],
         },
     )
-    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
 
     payload = manager.payload()
 
@@ -226,7 +224,6 @@ def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
         },
     )
     _write_cache(manager._cache_path("public"), {"meta": {}, "clis": []})
-    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
 
     app = manager.payload()["apps"][0]
 
@@ -263,46 +260,6 @@ def test_installed_payload_enriches_apps_from_cached_catalog(
     assert app["description"] == "Public duplicate entry"
     assert app["brand_color"] == "#5C5543"
     assert app["logo_url"] == "https://cdn.simpleicons.org/gimp/5C5543"
-
-
-def test_payload_includes_babo_extension_registry(tmp_path: Path) -> None:
-    manager = _manager(tmp_path)
-    _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
-    _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
-    _write_cache(
-        manager._cache_path("extensions"),
-        {
-            "meta": {"updated": "2026-05-29"},
-            "clis": [
-                {
-                    "name": "hyperframes",
-                    "display_name": "HyperFrames",
-                    "version": "latest",
-                    "description": "HTML-to-MP4 motion graphics CLI",
-                    "category": "video",
-                    "package_manager": "npm",
-                    "npm_package": "hyperframes",
-                    "install_cmd": "npm install -g hyperframes",
-                    "entry_point": "hyperframes",
-                    "logo_url": "https://raw.githubusercontent.com/heygen-com/hyperframes/main/assets/logo.png",
-                    "brand_color": "#111827",
-                    "skill_md": "skills/hyperframes/SKILL.md",
-                }
-            ],
-        },
-    )
-
-    payload = manager.payload()
-
-    assert payload["catalog_updated_at"] == "2026-05-29"
-    app = payload["apps"][0]
-    assert app["name"] == "hyperframes"
-    assert app["source"] == "extensions"
-    assert app["logo_url"] == "https://raw.githubusercontent.com/heygen-com/hyperframes/main/assets/logo.png"
-    assert app["brand_color"] == "#111827"
-    assert app["install_supported"] is True
-    assert app["manifest"]["source"] == "babo-extension"
-    assert app["manifest"]["trust"]["registry"] == "babo-extension"
 
 
 def test_optional_extension_registry_failure_does_not_break_payload(
@@ -352,21 +309,6 @@ def test_payload_cache_only_does_not_fetch_catalog(tmp_path: Path, monkeypatch: 
     assert payload["catalog_updated_at"] == "2026-04-18"
     assert {app["name"] for app in payload["apps"]} >= {"gimp", "feishu"}
     assert manager.catalog_cache_fresh() is True
-
-
-def test_catalog_cache_fresh_can_include_optional_sources(tmp_path: Path) -> None:
-    manager = _manager(tmp_path)
-    _write_cache(
-        manager._cache_path("harness"),
-        {"meta": {"updated": "2026-04-16"}, "clis": []},
-    )
-    _write_cache(
-        manager._cache_path("public"),
-        {"meta": {"updated": "2026-04-18"}, "clis": []},
-    )
-
-    assert manager.catalog_cache_fresh() is True
-    assert manager.catalog_cache_fresh(include_optional=True) is False
 
 
 def test_fetch_registry_async_offloads_cache_io_and_preserves_fallback(
@@ -579,9 +521,8 @@ def test_install_recovers_stale_npm_global_directory(
 ) -> None:
     manager = _manager(tmp_path)
     _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
-    _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
     _write_cache(
-        manager._cache_path("extensions"),
+        manager._cache_path("public"),
         {
             "meta": {"updated": "2026-05-29"},
             "clis": [
@@ -769,12 +710,12 @@ def test_fetch_skill_content_uses_extension_raw_base_for_relative_skills(
     content = manager._fetch_skill_content({
         "name": "hyperframes",
         "skill_md": "skills/hyperframes/SKILL.md",
-        "_raw_base": "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main",
+        "_raw_base": "https://raw.githubusercontent.com/example/cli-registry/main",
     })
 
     assert content and "# HyperFrames" in content
     assert seen == [
-        "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/skills/hyperframes/SKILL.md"
+        "https://raw.githubusercontent.com/example/cli-registry/main/skills/hyperframes/SKILL.md"
     ]
 
 

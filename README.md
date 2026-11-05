@@ -1,4 +1,9 @@
-<p align="center"><img alt="babo" src="./images/babo_logo.png" width="420"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./images/babo_wordmark_dark.svg">
+    <img alt="babo" src="./images/babo_wordmark.svg" width="360">
+  </picture>
+</p>
 
 # Babo
 

@@ -9,7 +9,7 @@ export function linearManifestUrl(
     distribution: "private",
     display: {
       description: "Mention or delegate issues to babo as a native Linear agent.",
-      iconUrl: "https://raw.githubusercontent.com/bgrimes-me/babo/main/images/babo_logo.png",
+      iconUrl: "https://raw.githubusercontent.com/bgrimes-me/babo/main/images/babo_icon.png",
     },
     developer: { name: "babo" },
     oauth: {

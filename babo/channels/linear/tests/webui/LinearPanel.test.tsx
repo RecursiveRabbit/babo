@@ -87,7 +87,7 @@ describe("Linear channel UI", () => {
     );
     expect(manifest.distribution).toBe("private");
     expect(manifest.display?.description).toContain("delegate issues");
-    expect(manifest.display?.iconUrl).toContain("babo_logo.png");
+    expect(manifest.display?.iconUrl).toContain("babo_icon.png");
     expect(manifest.oauth?.client_uri).toBe("https://github.com/bgrimes-me/babo");
     expect(manifest.oauth?.redirect_uris).toEqual([
       "https://babo.example.com/linear/oauth/callback",

@@ -9,7 +9,6 @@ import { DecisionCard, SessionRequestDetails } from "@/components/town/DecisionC
 import type { ResidentSessionRef } from "@/components/town/ResidentSessionsList";
 import { NoticesPanel } from "@/components/town/NoticesPanel";
 import { EvalPanel } from "@/components/town/EvalPanel";
-import { GuidesPanel } from "@/components/town/GuidesPanel";
 import { SessionAccessFields } from "@/components/town/AccessFields";
 import { RoundsView } from "@/components/town/RoundsView";
 import { OfficesPanel } from "@/components/town/OfficesPanel";
@@ -470,7 +469,6 @@ function DoctorView({ token }: { token: () => string }) {
     </>}
     </TownSection>
     <EvalPanel />
-    <GuidesPanel />
   </>;
 }
 

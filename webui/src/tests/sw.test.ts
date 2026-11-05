@@ -56,7 +56,10 @@ interface LoadedSw {
   fire: (type: string, event?: Record<string, unknown>) => Promise<void>;
 }
 
-function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
+function loadSw(
+  noticeStore = new FakeCacheStore(),
+  olderCaches: Array<[string, FakeCacheStore]> = [],
+): LoadedSw {
   const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
   const skipWaitingMock = vi.fn();
   const claimMock = vi.fn();
@@ -75,6 +78,7 @@ function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
   const store = new FakeCacheStore();
   const iconStore = new FakeCacheStore();
   const stores = new Map<string, FakeCacheStore>([
+    ...olderCaches,
     [CACHE_NAME, store],
     [ICON_CACHE_NAME, iconStore],
     ["babo-notification-receipts-v1", noticeStore],
@@ -88,8 +92,9 @@ function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
       stores.set(name, created);
       return created;
     }),
-    match: vi.fn(async (input: Request | string) => {
-      for (const cache of stores.values()) {
+    match: vi.fn(async (input: Request | string, options?: { cacheName?: string }) => {
+      for (const [name, cache] of stores) {
+        if (options?.cacheName && name !== options.cacheName) continue;
         const response = await cache.match(input);
         if (response) return response;
       }
@@ -546,6 +551,22 @@ describe("service worker", () => {
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(false);
+  });
+
+  it("reads only its own cache offline, never a page an older build left on this origin", async () => {
+    const older = new FakeCacheStore();
+    await older.put(`${ORIGIN}/`, indexHtml(["/assets/index-old.js"]));
+    const sw = loadSw(new FakeCacheStore(), [["an-older-build-static-v1", older]]);
+    await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
+    sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const request = new Request(`${ORIGIN}/`);
+    Object.defineProperty(request, "mode", { value: "navigate" });
+    const event = { request, respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+
+    const response = (await event.respondWith.mock.calls[0][0]) as Response;
+    expect(await response.text()).toContain("assets/index-v2.js");
   });
 
   it("serves the cached app shell for offline deep-link navigations", async () => {

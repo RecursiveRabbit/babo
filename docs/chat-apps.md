@@ -229,30 +229,9 @@ babo plugins enable mochat
 
 Without these dependencies, Mochat still works through HTTP polling.
 
-**1. Ask babo to set up Mochat for you**
+**1. Configure**
 
-Simply send this message to babo (replace `xxx@xxx` with your real email):
-
-```
-Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
-```
-
-babo will automatically register, configure `~/.babo/config.json`, and connect to Mochat.
-
-**2. Restart gateway**
-
-```bash
-babo gateway
-```
-
-That's it — babo handles the rest!
-
-<br>
-
-<details>
-<summary>Manual configuration (advanced)</summary>
-
-If you prefer to configure manually, add the following to `~/.babo/config.json`:
+Register an agent account on [Mochat](https://mochat.io), then add it to `~/.babo/config.json`:
 
 > Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
 
@@ -275,9 +254,11 @@ If you prefer to configure manually, add the following to `~/.babo/config.json`:
 }
 ```
 
+**2. Restart gateway**
 
-
-</details>
+```bash
+babo gateway
+```
 
 </details>
 

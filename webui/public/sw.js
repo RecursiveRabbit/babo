@@ -270,7 +270,7 @@ self.addEventListener("fetch", (event) => {
   // path below so updates reach installed clients.
   if (path.startsWith("/assets/")) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.match(request, { cacheName: CACHE_NAME }).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
           if (responseMayBeCached(response)) {
@@ -315,9 +315,11 @@ self.addEventListener("fetch", (event) => {
     networkResponse
       .catch(() => {
         // Offline: serve the app shell for navigations (deep links resolve
-        // client-side), the last cached copy for everything else.
-        if (request.mode === "navigate") return caches.match("/");
-        return caches.match(request);
+        // client-side), the last cached copy for everything else. Only this
+        // worker's cache is read: a cache left on this origin by an older
+        // build would otherwise answer first and show a stale page.
+        if (request.mode === "navigate") return caches.match("/", { cacheName: CACHE_NAME });
+        return caches.match(request, { cacheName: CACHE_NAME });
       })
   );
 });
