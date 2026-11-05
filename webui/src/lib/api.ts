@@ -1620,6 +1620,26 @@ export function moveInToTown(transport: WebUIMutationTransport, move: {
   return mutation<TownChange>(transport, "town.move_in", move);
 }
 
+/** Own time: a slot for each resident that is its own. Same as `babo own-time`. */
+export interface TownOwnTime {
+  every: string; choices: string[];
+  residents: { resident: string; name: string; office: string; every: string; own_setting: boolean; next: string;
+    recent: { resident: string; started: string; finished: string; status: string; why: string; said: string }[] }[];
+}
+
+export function fetchTownOwnTime(token: string, base: string = ""): Promise<TownOwnTime> {
+  return request<TownOwnTime>(`${base}/api/town/own-time`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** How often own time comes: for the town, or one resident ("town" to follow the town's). */
+export function setTownOwnTime(transport: WebUIMutationTransport, every: string, resident = ""): Promise<{ message: string; own_time: TownOwnTime }> {
+  return mutation<{ message: string; own_time: TownOwnTime }>(transport, "town.own_time.set", resident ? { every, resident } : { every });
+}
+
+export function giveOwnTimeNow(transport: WebUIMutationTransport, resident: string): Promise<{ message: string; own_time: TownOwnTime }> {
+  return mutation<{ message: string; own_time: TownOwnTime }>(transport, "town.own_time.now", { resident });
+}
+
 /** The town square: threads everyone starts and replies to. Same as `babo square`. */
 export interface TownThread {
   id: string; kind: string; title: string; author: string; text: string; status: string;

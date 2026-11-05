@@ -1474,6 +1474,54 @@ def square_close(thread: str = typer.Argument(...), text: str = typer.Option("",
     _square_change(config, {"action": "close", "thread": thread, "text": text})
 
 
+own_time_app = typer.Typer(help="Own time: a slot for each resident that is its own.", invoke_without_command=True)
+app.add_typer(own_time_app, name="own-time")
+
+
+@own_time_app.callback()
+def own_time_list(ctx: typer.Context, config: str | None = _CONFIG_OPT):
+    """How often each resident has its own time, when it comes next, and what it did with it last."""
+    from babo.baton import own_time
+
+    if ctx.invoked_subcommand:
+        return
+    t, _ = _town(config)
+    shown = own_time.overview(t)
+    console.print(f"Own time for the town: {shown['every']}")
+    for row in shown["residents"]:
+        last = row["recent"][0] if row["recent"] else None
+        when = row["next"] or "off"
+        console.print(f"- {row['resident']} ({row['every']}{', its own setting' if row['own_setting'] else ''}); next: {when}")
+        if last:
+            console.print(f"  last ({last['started'][:16].replace('T', ' ')}, {last['status']}): {escape(last['said'][:300])}", highlight=False)
+
+
+@own_time_app.command("set")
+def own_time_set(every: str = typer.Argument(..., help="daily, weekly or off (for one resident: town, to follow the town's)"),
+                 resident: str = typer.Option("", "--resident", "-r", help="Only this resident"),
+                 config: str | None = _CONFIG_OPT):
+    """How often own time comes, for the town or one resident."""
+    from babo.baton import own_time
+
+    t, _ = _town(config)
+    try:
+        console.print(own_time.set_every(t, every, resident))
+    except BatonError as exc:
+        _fail(exc)
+
+
+@own_time_app.command("now")
+def own_time_now(resident: str = typer.Argument(...), config: str | None = _CONFIG_OPT):
+    """Give a resident its own time now (upkeep starts it within a minute, when the model is free)."""
+    from babo.baton import own_time
+
+    t, _ = _town(config)
+    try:
+        console.print(own_time.request(t, resident))
+    except BatonError as exc:
+        _fail(exc)
+
+
 @app.command("now")
 def now_command(config: str | None = _CONFIG_OPT):
     """What's happening in the town right now: the model queue, what Babo is working on, the running

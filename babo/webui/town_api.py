@@ -51,6 +51,8 @@ TOWN_MUTATION_PATHS = {
     "town.move_away": "/api/town/move-away",
     "town.projects": "/api/town/projects/change",
     "town.square": "/api/town/square/change",
+    "town.own_time.set": "/api/town/own-time/set",
+    "town.own_time.now": "/api/town/own-time/now",
 }
 _DECISION_KINDS = ("tool", "proposal", "move_in", "move_away", "flag", "errand", "founding", "session")  # the last two: old names (step 28)
 _doctor_lock = asyncio.Lock()
@@ -302,6 +304,10 @@ class TownRoutes:
             from babo.baton import tasks
 
             return http_json_response({"lists": await asyncio.to_thread(lambda: [tasks.overview(x) for x in tasks.all_lists(_town()) if x.open])})
+        if got == "/api/town/own-time":
+            from babo.baton import own_time
+
+            return http_json_response(await asyncio.to_thread(lambda: own_time.overview(_town())))
         if got == "/api/town/square":
             from babo.baton import square
 
@@ -420,6 +426,15 @@ class TownRoutes:
                 _town(), office, role=role, why=why,
                 profile={str(k): str(v) for k, v in cast(dict[object, object], profile).items()} if profile else None,
                 joins=cast(list[dict[str, object]], joins) if joins else None))
+        elif got in ("/api/town/own-time/set", "/api/town/own-time/now"):
+            from babo.baton import own_time
+
+            resident = payload.get("resident") if isinstance(payload.get("resident"), str) else ""
+            if got.endswith("/now"):
+                said = await asyncio.to_thread(lambda: own_time.request(_town(), _text(payload, "resident", 80)))
+            else:
+                said = await asyncio.to_thread(lambda: own_time.set_every(_town(), _text(payload, "every", 20), str(resident or "")))
+            return http_json_response({"message": said, "own_time": await asyncio.to_thread(lambda: own_time.overview(_town()))})
         elif got == "/api/town/square/change":
             from babo.baton import square
 
