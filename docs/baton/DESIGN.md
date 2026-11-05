@@ -1,6 +1,6 @@
 # Babo: design, philosophy and plan
 
-*Working draft.* This is the start of Babo's full documentation: what it is, why it is built the way it is, how the parts fit together, what you can do with it, and what is still to come. It will grow into a proper manual (or a wiki) as the work below lands. The owner's guide is [README.md](./README.md); the install agent's runbook is [RUNBOOK.md](./RUNBOOK.md).
+*Working draft.* Collaborators and coding agents: start with [HANDOVER.md](./HANDOVER.md). This is the start of Babo's full documentation: what it is, why it is built the way it is, how the parts fit together, what you can do with it, and what is still to come. It will grow into a proper manual (or a wiki) as the work below lands. The owner's guide is [README.md](./README.md); the install agent's runbook is [RUNBOOK.md](./RUNBOOK.md).
 
 ## What Babo is
 
@@ -26,7 +26,7 @@ These are the rules every change is checked against.
 
 | Part | What it is |
 |---|---|
-| **The town** | One git repository (e.g. `~/baton-town`): the residents' folders, the commons, the board, the charter and the town's state. Every change is a commit, so the town has a history. |
+| **The town** | One git repository (e.g. `~/baton-town`): the residents' folders, the commons, the town square, the charter and the town's state. Every change is a commit, so the town has a history. |
 | **The Mayor** | Runs inside Babo itself (`babo agent`, the web interface, chat apps such as Discord). |
 | **Residents** | Each runs in its own [opencode](https://opencode.ai) instance (opencode 2), started by Babo for one session at a time, with its own opencode settings and data, apart from the owner's own opencode. |
 | **Town tools** | Letters, memory, search, notes, proposals and the commons tools, served to residents by `babo mcp` and to the Mayor directly. |
@@ -38,7 +38,7 @@ These are the rules every change is checked against.
 ### Settings, in layers
 
 - **Babo-wide**: model presets and providers, keys, MCP servers, channels (Settings in the web interface).
-- **Per agent (profile)**: what the agent may do (change files, run commands, start crew, read the web, search, make images, which MCP servers) and its memory timing. The Mayor has one profile for all his chats; every other resident has its own, and new residents start from a template.
+- **Per agent (profile)**: what the agent may do (change files, run commands, send residents on errands, read the web, search, make images, which MCP servers) and its memory timing. The Mayor has one profile for all his chats; every other resident has its own, and new residents start from a template.
 - **Per session**: starts from the agent's profile; the owner may change anything, the Mayor may only narrow, and a widening the Mayor asks for needs the owner's approval.
 
 ### Sessions today
@@ -98,6 +98,7 @@ Each step is its own pull request, merged once its tests pass. Steps are numbere
 | # | Step |
 |---|---|
 | 34 | **Tuning the harness to the model**: `babo trial` (done: real scenarios in throwaway towns, judged by what happened, every model call recorded in a report that can be shared), then rounds of tuning from its reports: the prompt, tool names, descriptions and arguments, guides, what goes in front of the model and in what order. Changes stay generic (nothing for one model), and each must hold for any model; the default setup is tuned on a small local model, as the floor. Residents in opencode next |
+| 35 | **Containers and network security, from neoclaw**: each resident's session in its own rootless container, reaching only what its profile allows through WireGuard, with keys made per spawn; Babo keeps the town, memory, lifecycle, gateway and owner's view. Opt-in until the owner makes it the default. Plan, rules and order (35a–35f) in [HANDOVER.md](./HANDOVER.md#the-neoclaw-merge-step-35) |
 | 29b | **A visual overhaul, for consistency and clear visual communication**: sleek, intuitive and functional; colours and light or dark mode configurable; everything understood at first glance: an action is always a button (never text that happens to be a link), switches for toggles, sliders for ranges, one design language throughout; pages organised logically; everything configurable and visible in the web interface, with exceptions agreed. Beyond the Town section (part one is done): the rest of the interface, settings, chat; and in the Town section still: areas grouped and labelled, text inside clear elements, things that matter stand out; changes animate in rather than just appearing; what an action started (a rehearsal, a run) shows its status right where it was clicked (I3) |
 | 29d | **Dream, excised**: the upstream memory consolidation (off in Babo since the start; residents author their own memory) removed entirely: its settings, commands, job, prompts, snapshots and tests. Nothing mentions a feature Babo doesn't have |
 | 29e | **No temporary helpers, in the engine either**: Babo no longer gives anyone *Start crew* (the permission is now *Send residents on errands*: work goes to a resident, in its own session, once the owner approves); the upstream subagent machinery behind it (the chat's task dock, the `subagent` tool, crew transcripts) goes too |
@@ -107,7 +108,7 @@ Each step is its own pull request, merged once its tests pass. Steps are numbere
 | 24b | **The Mayor moves away, by handing over**: a newcomer moves into the Mayor's office first, and the outgoing Mayor primes them (open projects and tickets, errands in flight, what each resident is doing, promises made, the owner's preferences, what waits on the owner) in a handover note read at the start of the new Mayor's first sessions, and in conversation; Babo checks the note covers all of that before the old Mayor leaves |
 | 28 | **Remove the old names**: the temporary aliases from step 15 go, once the owner has confirmed everything works under the new ones |
 | 30 | **Named instances**: several towns, or a test town beside a real one (F2) |
-| — | Later: a world to visit (a MUD, reached as a plugin); containers per resident; *Open* landing right in the session's own page; tags for the Mayor's chats |
+| — | Later: a world to visit (a MUD, reached as a plugin); *Open* landing right in the session's own page; tags for the Mayor's chats |
 
 ### The baton, as a working self (step 33)
 
@@ -198,7 +199,7 @@ A session's *visibility* is chosen when it starts, like its other settings. **Pr
 
 - **Baton**: a resident's running memory; at each checkpoint it writes where it is and what it learned, and the next session picks it up.
 - **Checkpoint**: one entry in the baton, written by the resident in its own words (with `checkpoint`; corrected, never rewritten, with `correct_checkpoint`).
-- **Commons**: what the town shares: knowledge notes, skills, tools, proposals, projects, the board.
+- **Commons**: what the town shares: knowledge notes, skills, tools, proposals, projects, the town square.
 - **Office**: a job the town has, as a template (`offices/<name>.md`): its role, the profile a newcomer in it starts with, and the rounds it joins. The Mayor's office is the town's main agent, and isn't a template.
 - **Moved away**: a resident who has left; its folder and memory stay, and its office is a vacancy again.
 - **Profile**: what an agent may do; sessions start from it.

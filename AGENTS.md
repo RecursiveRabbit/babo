@@ -1,5 +1,7 @@
 # Working on babo
 
+**Read [`docs/baton/HANDOVER.md`](docs/baton/HANDOVER.md) first**, then the principles in [`docs/baton/DESIGN.md`](docs/baton/DESIGN.md). Babo is a town of persistent AI residents on the owner's machine; every change is held to those principles (the owner decides, memory belongs to the resident, no ephemeral agents, parity between web and terminal, provider-agnostic, least access, keys never reach agents, a generic repository, stability first). Where a request conflicts with them, say so before writing code. The rest of this file is the code guidance inherited from the project Babo was forked from; it still applies.
+
 The Python gateway owns agent execution, sessions, tools, memory, and security policy. WebUI and TUI share that runtime; keep execution and policy out of the clients.
 
 ## Task-specific guidance
