@@ -84,6 +84,8 @@ export default {
     // relative to where a session works; so such a session may read, but never change anything.
     const real = (path) => { try { return realpathSync(path) } catch { return path } }
     const HOME = env.BABO_HOME ? real(env.BABO_HOME) : ""
+    // Where this session works: its own folder, one of its projects, or a folder outside the town its profile lists.
+    const WORKDIR = env.BABO_WORKDIR ? real(env.BABO_WORKDIR) : HOME
     const where = new Map()
     const homeOf = async (sessionID) => {
       if (!where.has(sessionID)) {
@@ -96,7 +98,9 @@ export default {
     // The resident's record (checkpoints/, BATON.md) is written only with its tools, so it always reads.
     const RECORD = /(^|\/)(checkpoints\/|BATON\.md$)/
     const inRecord = (resource) => {
-      const path = String(resource ?? "")
+      let path = String(resource ?? "")
+      // A relative path is where the session works (in a project, or a folder outside the town: not the record).
+      if (!path.startsWith("/") && WORKDIR !== HOME) path = `${WORKDIR}/${path}`
       const local = HOME && path.startsWith(HOME + "/") ? path.slice(HOME.length + 1) : path
       return !local.startsWith("/") && !local.startsWith("../") && RECORD.test(local)
     }
@@ -116,7 +120,7 @@ export default {
       }
       if (!HOME || ["read", "glob", "grep"].includes(event.action)) return
       const directory = await homeOf(event.sessionID).catch(() => null)
-      if (directory !== HOME) {
+      if (directory !== WORKDIR && directory !== HOME) {
         event.effect = "deny"
         event.message = `This resident changes things only in sessions that work in its own folder (${HOME}). Start one from Babo: the Sessions tab, or babo session new.`
       }

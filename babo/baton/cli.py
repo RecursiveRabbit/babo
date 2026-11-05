@@ -844,6 +844,8 @@ def _print_profile(row: dict[str, Any], profiles: Any) -> None:
                   f"Known in Babo: {', '.join(row['mcp_known']) or 'none'}")
     if not row["main"]:
         table.add_row("Model\n[dim]model[/dim]", row["model"] or "Babo default", "Used when the resident runs in opencode.")
+        table.add_row("Folders outside the town\n[dim]folders[/dim]", ", ".join(row.get("folders") or []) or "none",
+                      "Where a session of its may be given to work (babo session new --folder); comma-separated, or none.")
     for name, default in row["memory_defaults"].items():
         own = row["memory"][name]
         table.add_row(f"[dim]memory.{name}[/dim]", str(own) if own is not None else f"{default} (Babo-wide)",
@@ -1118,6 +1120,7 @@ def session_new(
     title: str = typer.Option("", "--title", help="A name for the session (default: the task's first line)"),
     done_check: str = typer.Option("", "--done-check", help="A command that must succeed (in the resident's folder) before the task counts as done, e.g. 'pytest -q'"),
     set_: list[str] = typer.Option([], "--set", help="Change the profile for this session only, e.g. --set shell=deny or --set model=<preset>"),
+    folder: str = typer.Option("", "--folder", help="Where it works: one of its projects (garden), or a folder outside the town its profile lists"),
     config: str | None = _CONFIG_OPT,
 ):
     """Start a new session for a resident (it starts from the resident's profile). With --task, it gets going on its own."""
@@ -1126,7 +1129,7 @@ def session_new(
     t, cfg = _town(config)
     try:
         said = views.start_session(t, cfg, resident, title=title, overrides=_overrides(set_), config_path=_config_path(), task=task,
-                                   done_check=done_check)
+                                   done_check=done_check, folder=folder)
         session = max((s for s in opencode.sessions(t, resident) if s.kind == "work"), key=lambda s: s.created)
     except BatonError as exc:
         _fail(exc)

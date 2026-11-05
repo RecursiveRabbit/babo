@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -82,6 +83,8 @@ class Profile(BaseModel):
     mcp: list[str] = Field(default_factory=list)
     model: str = ""
     memory: ProfileMemory = Field(default_factory=ProfileMemory)
+    # Folders outside the town (a project on the machine) a session of its may be given to work in.
+    folders: list[str] = Field(default_factory=list)
 
     def level(self, capability: str) -> Level:
         return self.capabilities.get(capability, "deny")
@@ -146,7 +149,7 @@ def mcp_permitted(profile: Profile, tool_name: str) -> bool:
 # -- changing a profile ----------------------------------------------------
 
 def editable_keys() -> list[str]:
-    return [c.key for c in CAPABILITIES] + ["read", "mcp", "model", "memory.checkpoint_every_tool_calls", "memory.idle_minutes"]
+    return [c.key for c in CAPABILITIES] + ["read", "mcp", "model", "folders", "memory.checkpoint_every_tool_calls", "memory.idle_minutes"]
 
 
 def with_changes(profile: Profile, changes: dict[str, object], *, agent: str, mcp_known: list[str],
@@ -180,6 +183,12 @@ def with_changes(profile: Profile, changes: dict[str, object], *, agent: str, mc
             if name and presets_known is not None and name not in presets_known:
                 raise BatonError(f"No model preset named {name!r} in Settings › Models (there are: {', '.join(presets_known) or 'none'}).")
             data["model"] = name
+        elif key == "folders":
+            if agent == MAYOR:
+                raise BatonError("The Mayor works in Babo itself, not in a folder; folders are for residents in opencode.")
+            items = [str(n) for n in cast(list[object], value)] if isinstance(value, list) else \
+                ([] if str(value or "").strip().lower() == "none" else str(value or "").split(","))
+            data["folders"] = [outside_folder(item) for item in items if item.strip()]
         elif key.startswith("memory.") and key.split(".", 1)[1] in ProfileMemory.model_fields:
             field = key.split(".", 1)[1]
             data["memory"][field] = None if value in ("", None, "default") else value
@@ -190,6 +199,20 @@ def with_changes(profile: Profile, changes: dict[str, object], *, agent: str, mc
     except ValidationError as exc:
         first = exc.errors()[0]
         raise BatonError(f"{'.'.join(str(p) for p in first['loc'])}: {first['msg']}") from exc
+
+
+def outside_folder(raw: str) -> str:
+    """A folder on the machine a session may work in: an existing folder, given in full (or from ~), never the
+    whole machine or a home folder itself."""
+    text = raw.strip()
+    if not text.startswith(("/", "~")):
+        raise BatonError(f"Give a folder in full, like /home/you/code/garden or ~/code/garden (not {text!r}).")
+    path = Path(text).expanduser().resolve()
+    if path == Path("/") or path == Path.home().resolve() or len(path.parts) < 3:
+        raise BatonError(f"{path} is too wide: give the project's own folder, not the machine or a home folder.")
+    if not path.is_dir():
+        raise BatonError(f"{path} isn't a folder on this machine.")
+    return str(path)
 
 
 def describe_changes(before: Profile, after: Profile) -> list[str]:
@@ -206,6 +229,8 @@ def describe_changes(before: Profile, after: Profile) -> list[str]:
         said.append(f"MCP servers: {names(before.mcp)} → {names(after.mcp)}")
     if before.model != after.model:
         said.append(f"Model: {before.model or 'Babo default'} → {after.model or 'Babo default'}")
+    if before.folders != after.folders:
+        said.append(f"Folders outside the town: {', '.join(before.folders) or 'none'} → {', '.join(after.folders) or 'none'}")
     for name in ProfileMemory.model_fields:
         old, new = getattr(before.memory, name), getattr(after.memory, name)
         if old != new:
@@ -218,6 +243,8 @@ def describe_changes(before: Profile, after: Profile) -> list[str]:
 def session_profile(profile: Profile, overrides: dict[str, object], *, agent: str, mcp_known: list[str],
                     presets_known: list[str] | None = None) -> Profile:
     """A session's effective profile: the agent's profile with the session's changes."""
+    if "folders" in overrides:
+        raise BatonError("A session works in one folder (its folder setting), not a list: give it one of its profile's folders.")
     if agent == MAYOR and overrides:
         raise BatonError("The Mayor has the same profile in every session; change the Mayor's profile instead.")
     return with_changes(profile, overrides, agent=agent, mcp_known=mcp_known, presets_known=presets_known)
@@ -257,6 +284,7 @@ def describe(town: Town, cfg: BatonConfig, agent: str, office: str, *, mcp_known
         "mcp": mcp_servers(profile, mcp_known),
         "mcp_known": mcp_known,
         "model": profile.model,
+        "folders": profile.folders,
         "memory": profile.memory.model_dump(),
         "memory_defaults": {"checkpoint_every_tool_calls": cfg.memory.checkpoint_every_tool_calls,
                             "idle_minutes": cfg.memory.idle_minutes},
@@ -267,6 +295,11 @@ def update(town: Town, cfg: BatonConfig, agent: str, office: str, changes: dict[
            presets_known: list[str] | None = None) -> list[str]:
     before = load(town, cfg, agent, office)
     after = with_changes(before, changes, agent=agent, mcp_known=mcp_known, presets_known=presets_known)
+    town_root = town.root.resolve()
+    for folder in after.folders:
+        if Path(folder).is_relative_to(town_root) or town_root.is_relative_to(Path(folder)):
+            raise BatonError(f"{folder} is the town, or holds it: a folder outside the town is somewhere else on the machine. "
+                             "For a resident's own project, choose it as the session's folder instead.")
     said = describe_changes(before, after)
     if said:
         who = "new residents" if agent == NEW_RESIDENTS else agent

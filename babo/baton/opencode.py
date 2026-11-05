@@ -220,6 +220,9 @@ class Session:
     done_tries: int = 0
     done_checked: str = ""  # when it last ran
     rehearsal: str = ""  # "<rehearsal id>:<step>" while it rehearses a round's step: the owner's answers are recorded
+    # Where it works ("" = the resident's own folder): one of its projects (projects/<name>), or a folder outside the
+    # town its profile lists (``folders``). Its file tools work there, and nowhere else.
+    folder: str = ""
 
     @property
     def key(self) -> str:
@@ -267,23 +270,66 @@ def get_session(town: Town, resident: str, session_id: str | None = None) -> Ses
 
 def new_session(
     town: Town, config: Config, resident: str, *, title: str = "", overrides: dict[str, object] | None = None,
-    by: str = OWNER, kind: str = "work", commands: list[str] | None = None, done_check: str = "",
+    by: str = OWNER, kind: str = "work", commands: list[str] | None = None, done_check: str = "", folder: str = "",
 ) -> Session:
     """Record a new session. The owner may change anything for it; the Mayor may
     only narrow it, because a resident's profile is the owner's to widen."""
     agent = Registry(town).require_active(resident)
     if not runs_in_opencode(agent.office):
         raise BatonError("The Mayor runs in Babo itself; talk to it with `babo` or the web interface.")
-    effective_profile(town, config, resident, overrides or {}, by=by)
+    profile = effective_profile(town, config, resident, overrides or {}, by=by)
+    folder = session_folder(town, resident, profile, folder)
     if done_check.strip() and not is_owner(by):
         raise BatonError(f"Only {town.owner_name} can give a session a done-check: it runs as a command on the machine.")
     stamp = now_iso()
     session_id = stamp[:16].replace(":", "").replace("T", "-") + "-" + secrets.token_hex(2)
     session = Session(resident=resident, id=session_id, title=title.strip() or f"{resident}: {stamp[:16].replace('T', ' ')}",
                       kind=kind, overrides=dict(overrides or {}), created=stamp, by=by, commands=list(commands or []),
-                      done_check=done_check.strip())
+                      done_check=done_check.strip(), folder=folder)
     save_session(town, session)
     return session
+
+
+def session_folder(town: Town, resident: str, profile: profiles.Profile, folder: str) -> str:
+    """Check where a session may work: "" (its own folder), one of its projects, or a folder its profile lists."""
+    folder = folder.strip()
+    if not folder:
+        return ""
+    home = town.resident_dir(resident).resolve()
+    if not folder.startswith(("/", "~")):  # one of its projects
+        name = folder.removeprefix("projects/").strip("/")
+        target = (home / "projects" / name).resolve()
+        if not name or not target.is_relative_to(home / "projects") or not target.is_dir():
+            known = sorted(p.name for p in (home / "projects").iterdir() if p.is_dir()) if (home / "projects").is_dir() else []
+            raise BatonError(f"{resident} has no project called '{name}'. Its projects: {', '.join(known) or 'none yet'}.")
+        return f"projects/{target.name}"
+    target = Path(folder).expanduser().resolve()
+    if str(target) not in [str(Path(f).expanduser().resolve()) for f in profile.folders]:
+        raise BatonError(f"{target} isn't one of the folders {resident}'s profile lets it work in"
+                         f"{': ' + ', '.join(profile.folders) if profile.folders else ' (none yet)'}. Add it to the profile first.")
+    if not target.is_dir():
+        raise BatonError(f"{target} isn't a folder on this machine (any more).")
+    return str(target)
+
+
+def folder_choices(town: Town, config: Config, resident: str) -> list[dict[str, str]]:
+    """Where a new session of this resident's may work: its own folder, its projects, the folders its profile lists."""
+    home = town.resident_dir(resident)
+    out = [{"value": "", "label": "its own folder"}]
+    projects = home / "projects"
+    out += [{"value": f"projects/{p.name}", "label": f"project: {p.name}"} for p in sorted(projects.iterdir()) if p.is_dir()] \
+        if projects.is_dir() else []
+    profile = profiles.load(town, config.baton, resident, Registry(town).require_active(resident).office)
+    out += [{"value": f, "label": f} for f in profile.folders]
+    return out
+
+
+def workdir(town: Town, session: Session) -> Path:
+    """The folder a session works in."""
+    home = town.resident_dir(session.resident)
+    if not session.folder:
+        return home
+    return home / session.folder if not session.folder.startswith("/") else Path(session.folder)
 
 
 def effective_profile(town: Town, config: Config, resident: str, overrides: dict[str, object], *, by: str) -> profiles.Profile:
@@ -545,6 +591,7 @@ def _memory_env(town: Town, config: Config, session: Session, *, config_path: Pa
         "BABO_TASKS": str(_tasks_reminder(town, session)),
         "BABO_RECORD_REFUSAL": _record_refusal(),
         "BABO_HOME": str(town.resident_dir(session.resident)),
+        "BABO_WORKDIR": str(workdir(town, session)),
         "BABO_SPOOL": str(spool_path(town, session)),
         "BABO_NOW": str(now_path(town, session)),
         "BABO_GUIDES": str(guides_path(town, session)),
@@ -647,7 +694,7 @@ def start(town: Town, config: Config, session: Session, *, config_path: Path) ->
             _install_plugin(config, session.resident)
             proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
                 [binary, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
-                cwd=town.resident_dir(session.resident), env=env,
+                cwd=workdir(town, session), env=env,
                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
             )
             run = Running(pid=proc.pid, port=port, password=password, started=now_iso())
@@ -1128,7 +1175,7 @@ DONE_TIMEOUT_S = 120
 def run_done_check(town: Town, session: Session) -> tuple[bool, str]:
     """Run a session's done-check in the resident's folder: (passed, the end of what it printed)."""
     try:
-        done = subprocess.run(["bash", "-lc", session.done_check], cwd=town.resident_dir(session.resident),
+        done = subprocess.run(["bash", "-lc", session.done_check], cwd=workdir(town, session),
                               capture_output=True, text=True, timeout=DONE_TIMEOUT_S, check=False)
     except subprocess.TimeoutExpired:
         return False, f"(it took longer than {DONE_TIMEOUT_S} seconds)"
