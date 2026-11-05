@@ -1871,3 +1871,16 @@
 .code-content .token.italic {
   font-style: italic;
 }
+
+/* The accent colour (Settings › Appearance): primary actions, the selected tab, focus rings, what needs you.
+   "neutral" is the default monochrome; each accent has a light and a dark value. */
+:root[data-accent="blue"] { --primary: 221 83% 50%; --primary-foreground: 0 0% 100%; --ring: 221 83% 50%; }
+:root[data-accent="green"] { --primary: 152 69% 31%; --primary-foreground: 0 0% 100%; --ring: 152 69% 31%; }
+:root[data-accent="amber"] { --primary: 32 95% 40%; --primary-foreground: 0 0% 100%; --ring: 32 95% 40%; }
+:root[data-accent="rose"] { --primary: 346 77% 47%; --primary-foreground: 0 0% 100%; --ring: 346 77% 47%; }
+:root[data-accent="violet"] { --primary: 262 70% 55%; --primary-foreground: 0 0% 100%; --ring: 262 70% 55%; }
+:root.dark[data-accent="blue"] { --primary: 213 94% 68%; --primary-foreground: 222 47% 11%; --ring: 213 94% 68%; }
+:root.dark[data-accent="green"] { --primary: 152 60% 52%; --primary-foreground: 150 40% 8%; --ring: 152 60% 52%; }
+:root.dark[data-accent="amber"] { --primary: 38 92% 60%; --primary-foreground: 30 40% 8%; --ring: 38 92% 60%; }
+:root.dark[data-accent="rose"] { --primary: 350 89% 70%; --primary-foreground: 345 40% 10%; --ring: 350 89% 70%; }
+:root.dark[data-accent="violet"] { --primary: 263 85% 76%; --primary-foreground: 262 40% 12%; --ring: 263 85% 76%; }

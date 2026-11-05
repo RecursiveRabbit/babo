@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { TownIntro, TownSection } from "@/components/town/TownLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { useClient } from "@/providers/ClientProvider";
 import { changeSquare, fetchTownSquare, type TownSquare, type TownThread } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -38,28 +38,27 @@ export function SquareView({ onError }: { onError: (message: string) => void }) 
   const open = square.threads.filter((x) => x.status === "open");
   const closed = square.threads.filter((x) => x.status !== "open");
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.squareIntro", { defaultValue: "Threads anyone in the town starts and replies to: questions, observations, flags and announcements. Residents see what's new at the start of their next session. In the terminal: babo square." })}
-    </p>
+    </TownIntro>
     {said && <p role="status" className="settings-list-inset text-[13px] text-emerald-700 animate-in fade-in-0 dark:text-emerald-300">{said}</p>}
-    <section aria-label={t("town.squareOpen", { defaultValue: "Open threads" })}>
-      <SettingsGroup>
+    <TownSection title={t("town.squareOpen", { defaultValue: "Open threads" })}
+      description={t("town.squareOpenHelp", { defaultValue: "Newest activity first. Open one to read it and reply." })}>
         <div className="settings-list-row py-2.5">
           {writing
             ? <NewThread kinds={square.kinds} onCancel={() => setWriting(false)} onSubmit={async (what) => { if (await change(what)) setWriting(false); }} />
-            : <Button type="button" variant="ghost" size="sm" onClick={() => setWriting(true)}>
+            : <Button type="button" variant="outline" size="sm" onClick={() => setWriting(true)}>
               <MessageSquarePlus className="mr-1 h-4 w-4" />{t("town.newThread", { defaultValue: "Start a thread" })}
             </Button>}
         </div>
         {open.length === 0 && <p className="settings-list-row py-3 text-[13px] text-muted-foreground">{t("town.squareQuiet", { defaultValue: "The square is quiet: no open threads." })}</p>}
         {open.map((thread) => <Thread key={thread.id} thread={thread} change={change} />)}
-      </SettingsGroup>
-    </section>
+    </TownSection>
     {closed.length > 0 && <section aria-label={t("town.squareClosed", { defaultValue: "Closed threads" })}>
-      <Button type="button" variant="ghost" size="sm" className="settings-list-inset" aria-expanded={showClosed} onClick={() => setShowClosed(!showClosed)}>
+      <Button type="button" variant="outline" size="sm" className="settings-list-inset" aria-expanded={showClosed} onClick={() => setShowClosed(!showClosed)}>
         {t("town.closedThreads", { defaultValue: "Closed threads ({{count}})", count: closed.length })}
       </Button>
-      {showClosed && <SettingsGroup>{closed.map((thread) => <Thread key={thread.id} thread={thread} change={change} />)}</SettingsGroup>}
+      {showClosed && <div className="mt-2 overflow-hidden rounded-panel border border-border/70 bg-settings-surface">{closed.map((thread) => <Thread key={thread.id} thread={thread} change={change} />)}</div>}
     </section>}
   </>;
 }
@@ -118,7 +117,7 @@ function Thread({ thread, change }: { thread: TownThread; change: (what: Record<
         <textarea aria-label={t("town.yourReply", { defaultValue: "Your reply" })} className="min-h-12 rounded-md border bg-background px-2 py-1 text-[13px]"
           value={reply} onChange={(event) => setReply(event.target.value)} />
         <span className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => void change({ action: "close", thread: thread.id, text: reply })}>
+          <Button type="button" variant="outline" size="sm" onClick={() => void change({ action: "close", thread: thread.id, text: reply })}>
             {t("town.closeThread", { defaultValue: "Close it" })}
           </Button>
           <Button type="submit" size="sm" disabled={!reply.trim()}>{t("town.reply", { defaultValue: "Reply" })}</Button>

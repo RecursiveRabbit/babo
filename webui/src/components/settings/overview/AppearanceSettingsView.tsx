@@ -8,6 +8,8 @@ import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ThemePreference } from "@/hooks/useTheme";
+import { ACCENTS, useAccent, type Accent } from "@/lib/accent";
+import { cn } from "@/lib/utils";
 import type { FileEditDisplayMode, LocalActivityMode, LocalPreferences } from "@/lib/local-preferences";
 import { ReadingSettings } from "./ReadingSettings";
 import "./appearance-settings.css";
@@ -50,6 +52,8 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
         </div>
       </fieldset>
     </section>
+
+    <AccentSection />
 
     <section>
       <SettingsSectionTitle>{t("settings.appearance.reading")}</SettingsSectionTitle>
@@ -107,4 +111,38 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
       </SettingsGroup>
     </section>
   </div>;
+}
+
+const SWATCH: Record<Accent, string> = {
+  neutral: "bg-zinc-800 dark:bg-zinc-200", blue: "bg-blue-600 dark:bg-blue-400", green: "bg-emerald-700 dark:bg-emerald-400",
+  amber: "bg-amber-600 dark:bg-amber-400", rose: "bg-rose-600 dark:bg-rose-400", violet: "bg-violet-600 dark:bg-violet-400",
+};
+
+/** The accent colour: buttons that do the main thing, the selected tab, focus rings and what needs you. */
+function AccentSection() {
+  const { t } = useTranslation();
+  const [accent, setAccent] = useAccent();
+  const names: Record<Accent, string> = {
+    neutral: t("settings.accent.neutral", { defaultValue: "Neutral" }), blue: t("settings.accent.blue", { defaultValue: "Blue" }),
+    green: t("settings.accent.green", { defaultValue: "Green" }), amber: t("settings.accent.amber", { defaultValue: "Amber" }),
+    rose: t("settings.accent.rose", { defaultValue: "Rose" }), violet: t("settings.accent.violet", { defaultValue: "Violet" }),
+  };
+  return <section>
+    <SettingsSectionTitle>{t("settings.rows.accent", { defaultValue: "Accent colour" })}</SettingsSectionTitle>
+    <SettingsGroup>
+      <div className="settings-list-row flex flex-col gap-3 py-3">
+        <p className="text-xs text-muted-foreground">
+          {t("settings.help.accent", { defaultValue: "Used for the main button on a page, the selected tab, focus rings, and what needs you. In light and dark alike." })}
+        </p>
+        <div role="radiogroup" aria-label={t("settings.rows.accent", { defaultValue: "Accent colour" })} className="flex flex-wrap gap-2">
+          {ACCENTS.map((value) => <button key={value} type="button" role="radio" aria-checked={accent === value} onClick={() => setAccent(value)}
+            className={cn("flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] transition-colors hover:bg-muted/60",
+              accent === value && "border-foreground/40 bg-muted/60 font-medium")}>
+            <span className={cn("h-3.5 w-3.5 rounded-full", SWATCH[value])} aria-hidden />{names[value]}
+            {accent === value && <Check className="h-3.5 w-3.5" aria-hidden />}
+          </button>)}
+        </div>
+      </div>
+    </SettingsGroup>
+  </section>;
 }

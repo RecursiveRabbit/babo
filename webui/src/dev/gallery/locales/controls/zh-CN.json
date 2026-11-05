@@ -504,5 +504,11 @@
     "view": "查看邀请",
     "dismissed": "预览中选择了不再提醒",
     "starred": "预览中选择了 GitHub 链接"
+  },
+  "slider": {
+    "title": "Slider",
+    "description": "A number within a range, with its value beside it, in the accent colour.",
+    "options": "value, min, max, step, onChange, ariaLabel, disabled, unit",
+    "label": "Checkpoint after … quiet minutes"
   }
 }

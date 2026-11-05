@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./globals.css";
 import { initializeI18n } from "./i18n";
+import { initializeAccent } from "./lib/accent";
 import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -28,6 +29,7 @@ initializePairReturn();
 window.addEventListener("hashchange", initializePairReturn);
 
 async function renderWebui(container: HTMLElement) {
+  initializeAccent();
   // The critical skeleton paints immediately; React must wait for the full stylesheet.
   const styles = [...document.querySelectorAll<HTMLLinkElement>("link[data-app-stylesheet]")]
     .map((link) => new Promise<void>((resolve, reject) => {

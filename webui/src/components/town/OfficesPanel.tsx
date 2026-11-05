@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Loader2, Plus, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { TownSection } from "@/components/town/TownLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { SessionAccessFields } from "@/components/town/AccessFields";
 import { useClient } from "@/providers/ClientProvider";
 import {
@@ -25,8 +25,8 @@ export function OfficesPanel({ town, onChanged, onError }: {
   const offices = town.offices?.offices ?? [];
   const vacancies = offices.filter((o) => o.vacant);
   return <>
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{t("town.vacancies", { defaultValue: "Vacancies" })}</h2>
-    <SettingsGroup>
+    <TownSection title={t("town.vacancies", { defaultValue: "Vacancies" })}
+      description={t("town.vacanciesHelp", { defaultValue: "Offices nobody holds, and moving a newcomer in: into one of them, or a new office." })}>
       {vacancies.length === 0 && <p className="settings-list-row py-3 text-[13px] text-muted-foreground">
         {t("town.noVacancies", { defaultValue: "Every office is held." })}
       </p>}
@@ -52,7 +52,7 @@ export function OfficesPanel({ town, onChanged, onError }: {
         </Button>
         {moving === NEW && <MoveInForm office={null} town={town} onDone={(change) => { setMoving(null); onChanged(change); }} onError={onError} />}
       </div>
-    </SettingsGroup>
+    </TownSection>
   </>;
 }
 
@@ -127,7 +127,7 @@ function MoveInForm({ office, town, onDone, onError }: {
         </select>
         <Input className="min-w-48 flex-1" aria-label={t("town.joinDuty", { defaultValue: "Its duty there" })} value={j.duty} maxLength={2000}
           placeholder={t("town.joinDuty", { defaultValue: "Its duty there" })} onChange={(event) => setJoin(index, { duty: event.target.value })} />
-        <Button type="button" variant="ghost" size="sm" onClick={() => setJoins((all) => all.filter((_, i) => i !== index))}>
+        <Button type="button" variant="outline" size="sm" onClick={() => setJoins((all) => all.filter((_, i) => i !== index))}>
           {t("town.remove", { defaultValue: "Remove" })}
         </Button>
       </div>)}

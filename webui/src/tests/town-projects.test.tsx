@@ -64,7 +64,7 @@ describe("the Projects tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New project" }));
     const form = screen.getByRole("form", { name: "New project" });
     fireEvent.change(within(form).getByRole("textbox", { name: "Title" }), { target: { value: "Paper" } });
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("switch", { name: "Help wanted" }));
     fireEvent.click(within(form).getByRole("button", { name: "Start it" }));
     await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.projects",
       { action: "new_project", title: "Paper", description: "", help_wanted: true }, expect.any(Number)));

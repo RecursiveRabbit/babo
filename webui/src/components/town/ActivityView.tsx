@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { TownSection, TownIntro } from "@/components/town/TownLayout";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useClient } from "@/providers/ClientProvider";
 import { fetchTownLogs, fetchTownNow, type TownActivity, type TownLogs, type TownNow } from "@/lib/api";
@@ -19,19 +19,16 @@ function ago(when: string): string {
 export function ActivityView({ onError }: { onError: (message: string) => void }) {
   const { t } = useTranslation();
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.activityIntro", { defaultValue: "What's happening in the town right now, and what Babo's services have been saying. In the terminal: babo now, babo logs." })}
-    </p>
+    </TownIntro>
     <RightNow onError={onError} />
     <Logs onError={onError} />
   </>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section aria-label={title}>
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{title}</h2>
-    <SettingsGroup>{children}</SettingsGroup>
-  </section>;
+  return <TownSection title={title}>{children}</TownSection>;
 }
 
 function RightNow({ onError }: { onError: (message: string) => void }) {

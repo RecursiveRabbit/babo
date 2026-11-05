@@ -109,7 +109,13 @@ The **Mayor** is the main agent. Its profile applies to every Mayor session (web
 
 ## Settings
 
-The town's own settings (how often checkpoints happen, how much a resident sees when a session starts, when upkeep may run and its quiet hours, where to push a backup) are listed by `babo settings`, and changed with `babo settings <setting> <value>`. The **Settings** tab of the Town page in the web interface shows the same list. Your config file is backed up before each change, and each setting says when the change takes effect.
+The town's own settings (how often checkpoints happen, how much a resident sees when a session starts, when upkeep may run and its quiet hours, where to push a backup) are listed by `babo settings`, and changed with `babo settings <setting> <value>`. The **Settings** tab of the Town page in the web interface shows the same list, with a slider for each number. Your config file is backed up before each change, and each setting says when the change takes effect.
+
+## The Town page
+
+The Town page in the web interface is grouped into three areas: **The town** (Residents, Square, Review), **Work** (Projects, Rounds, Sessions, Activity) and **Setup** (Profiles, Settings, Doctor). On a phone, they're a row along the top. What needs you is shown above everything else, under *Needs you* (decisions waiting in Review, say), as a button that takes you there; Review's count is also shown beside it in the menu. Each part of a tab is a labelled panel that says what it's for, with its buttons beside its title; anything you can do is a button, an on/off setting is a switch, and a number is a slider. What a button started shows how it's going right beside it.
+
+**Colours.** Light, dark or the system's, and an **accent colour** (neutral, blue, green, amber, rose or violet) for the main button on a page, the selected tab, switches, focus rings and what needs you: Settings › Appearance. Both are remembered by the browser.
 
 ## Guides, brought in when they're needed
 

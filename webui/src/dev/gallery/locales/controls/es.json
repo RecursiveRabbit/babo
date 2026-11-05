@@ -504,5 +504,11 @@
     "view": "Ver invitación",
     "dismissed": "Se eligió no volver a recordar en la vista previa",
     "starred": "Se eligió el enlace de GitHub en la vista previa"
+  },
+  "slider": {
+    "title": "Slider",
+    "description": "A number within a range, with its value beside it, in the accent colour.",
+    "options": "value, min, max, step, onChange, ariaLabel, disabled, unit",
+    "label": "Checkpoint after … quiet minutes"
   }
 }

@@ -30,27 +30,28 @@ class Setting:
     help: str
     kind: Kind
     applies: str  # when the change takes effect, in plain words
+    range: tuple[int, int, int] | None = None  # an int's sensible (lowest, highest, step), for a slider
 
 
 UPKEEP = "after the upkeep service restarts (systemctl --user restart babo-upkeep, on the host)"
 RESTART = "after Babo restarts (babo gateway restart, or the restart button in Settings)"
 SETTINGS: tuple[Setting, ...] = (
     Setting("memory.checkpoint_every_tool_calls", "Checkpoint every … tool calls",
-            "How often a working resident is asked to write a checkpoint in its own words.", "int", RESTART),
+            "How often a working resident is asked to write a checkpoint in its own words.", "int", RESTART, (3, 100, 1)),
     Setting("memory.commit_gate_after_tool_calls", "Hold commits after … tool calls without a checkpoint",
-            "A resident's `git commit` waits until it has written a checkpoint this recently.", "int", RESTART),
+            "A resident's `git commit` waits until it has written a checkpoint this recently.", "int", RESTART, (1, 100, 1)),
     Setting("memory.idle_minutes", "Checkpoint after … quiet minutes",
-            "A session that goes quiet this long gets a checkpoint, so nothing is lost.", "int", RESTART),
+            "A session that goes quiet this long gets a checkpoint, so nothing is lost.", "int", RESTART, (1, 240, 1)),
     Setting("bundle.max_tokens", "Start-of-session context (tokens)",
-            "How much a resident sees when a session starts: who it is, its baton, letters and notes.", "int", RESTART),
+            "How much a resident sees when a session starts: who it is, its baton, letters and notes.", "int", RESTART, (800, 8000, 100)),
     Setting("bundle.search_hits", "Notes found at session start",
-            "How many related notes are put in front of a resident when a session starts (0–10).", "int", RESTART),
+            "How many related notes are put in front of a resident when a session starts (0–10).", "int", RESTART, (0, 10, 1)),
     Setting("upkeep.wait_minutes", "Upkeep waits until the model has been free for … minutes",
             "Memory reviews and curation never get in your way: they wait until nobody has used the model this long.",
-            "int", UPKEEP),
+            "int", UPKEEP, (1, 120, 1)),
     Setting("upkeep.review_after_hours", "Review memory after … hours of activity",
             "A resident reviews its memory once its unreviewed activity is this old and its session has gone quiet.",
-            "int", UPKEEP),
+            "int", UPKEEP, (1, 48, 1)),
     Setting("upkeep.quiet_hours", "Quiet hours",
             "Everything waiting is done during these hours, and housekeeping runs even on a day nobody talked (HH:MM-HH:MM).",
             "hours", UPKEEP),
@@ -74,7 +75,7 @@ def _get(cfg: BatonConfig, key: str) -> Any:
 
 def current(cfg: BatonConfig) -> list[dict[str, Any]]:
     return [{"key": s.key, "label": s.label, "help": s.help, "kind": s.kind, "applies": s.applies,
-             "value": _get(cfg, s.key)} for s in SETTINGS]
+             "value": _get(cfg, s.key), **({"range": list(s.range)} if s.range else {})} for s in SETTINGS]
 
 
 def _coerce(setting: Setting, raw: object) -> object:

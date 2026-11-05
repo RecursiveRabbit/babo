@@ -504,5 +504,11 @@
     "view": "招待を表示",
     "dismissed": "プレビューで今後表示しないを選択しました",
     "starred": "プレビューで GitHub リンクを選択しました"
+  },
+  "slider": {
+    "title": "Slider",
+    "description": "A number within a range, with its value beside it, in the accent colour.",
+    "options": "value, min, max, step, onChange, ariaLabel, disabled, unit",
+    "label": "Checkpoint after … quiet minutes"
   }
 }

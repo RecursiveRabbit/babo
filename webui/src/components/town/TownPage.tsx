@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { MarkdownText } from "@/components/MarkdownText";
 import { DecisionCard, SessionRequestDetails } from "@/components/town/DecisionCard";
 import type { ResidentSessionRef } from "@/components/town/ResidentSessionsList";
@@ -17,6 +16,8 @@ import { OfficesPanel } from "@/components/town/OfficesPanel";
 import { TasksPanel } from "@/components/town/TasksPanel";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { ActivityView } from "@/components/town/ActivityView";
+import { Slider } from "@/components/ui/slider";
+import { AttentionStrip, TownNav, TownSection, TownIntro } from "@/components/town/TownLayout";
 import { ProjectsView } from "@/components/town/ProjectsView";
 import { SquareView } from "@/components/town/SquareView";
 import { useClient } from "@/providers/ClientProvider";
@@ -118,20 +119,30 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
             {t("town.unnamed", { defaultValue: "The town has no name yet. A resident can propose one; it will show up in Review." })}
           </p>}
         </div>
-        <div className="settings-stack">
-          <SegmentedControl<TownTab> mode="tabs" value={tab} onChange={setTab} ariaLabel={t("town.sections", { defaultValue: "Town sections" })}
-            options={[
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[12.5rem_minmax(0,1fr)]">
+          <TownNav<TownTab> value={tab} onChange={setTab} ariaLabel={t("town.sections", { defaultValue: "Town sections" })} groups={[
+            { label: t("town.group.town", { defaultValue: "The town" }), items: [
               { value: "town", label: t("town.tab.town", { defaultValue: "Residents" }) },
-              { value: "sessions", label: t("town.tab.sessions", { defaultValue: "Sessions" }) },
               { value: "square", label: t("town.tab.square", { defaultValue: "Square" }) },
+              { value: "review", label: t("town.tab.review", { defaultValue: "Review" }), badge: waiting },
+            ] },
+            { label: t("town.group.work", { defaultValue: "Work" }), items: [
               { value: "projects", label: t("town.tab.projects", { defaultValue: "Projects" }) },
               { value: "rounds", label: t("town.tab.rounds", { defaultValue: "Rounds" }) },
+              { value: "sessions", label: t("town.tab.sessions", { defaultValue: "Sessions" }) },
               { value: "activity", label: t("town.tab.activity", { defaultValue: "Activity" }) },
-              { value: "review", label: waiting ? t("town.tab.reviewWaiting", { defaultValue: "Review ({{count}})", count: waiting }) : t("town.tab.review", { defaultValue: "Review" }) },
+            ] },
+            { label: t("town.group.setup", { defaultValue: "Setup" }), items: [
               { value: "profiles", label: t("town.tab.profiles", { defaultValue: "Profiles" }) },
-              { value: "doctor", label: t("town.tab.doctor", { defaultValue: "Doctor" }) },
               { value: "settings", label: t("town.tab.settings", { defaultValue: "Settings" }) },
-            ]} />
+              { value: "doctor", label: t("town.tab.doctor", { defaultValue: "Doctor" }) },
+            ] },
+          ]} />
+        <div className="settings-stack min-w-0">
+          <AttentionStrip label={t("town.needsYou", { defaultValue: "Needs you" })} items={waiting ? [{
+            key: "review", onClick: () => setTab("review"),
+            text: t("town.decisionsWaiting", { defaultValue: "{{count}} decision(s) wait in Review", count: waiting }),
+          }] : []} />
           {notice && <p role="status" className="settings-list-inset flex items-center gap-2 text-[13px] text-foreground"><Check className="h-4 w-4 shrink-0" />{notice}</p>}
           {error && <p role="alert" className="settings-list-inset flex items-center gap-2 text-[13px] text-destructive"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
           {tab === "town" && <ResidentsView town={town} onChanged={changed} onError={setError} transport={client} />}
@@ -145,6 +156,7 @@ export function TownPage({ mainNavigationExpanded = false, hostChromeInset = fal
           {tab === "profiles" && <ProfilesView token={getToken} transport={client} onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
           {tab === "doctor" && <DoctorView token={getToken} />}
           {tab === "settings" && <TownSettingsView token={getToken} transport={client} onNotice={(message) => { setNotice(message); setError(""); }} onError={setError} />}
+        </div>
         </div>
       </div>
     </div>
@@ -181,7 +193,8 @@ function ResidentsView({ town, transport, onChanged, onError }: {
   };
 
   return <>
-    <SettingsGroup>
+    <TownSection title={t("town.residents", { defaultValue: "Residents" })}
+      description={t("town.residentsHelp", { defaultValue: "Who lives in the town, when each was last active, and what waits for them." })}>
       {town.residents.map((r) => <div key={r.id} className="settings-list-row flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
         <span className="min-w-0 flex-1">
           <span className="block text-[14px] font-medium">{r.name ? `${r.name} (${r.id})` : r.id}</span>
@@ -192,10 +205,10 @@ function ResidentsView({ town, transport, onChanged, onError }: {
             {r.status !== "active" ? ` · ${r.status}` : ""}
           </span>
         </span>
-        <Button variant="ghost" size="sm" onClick={() => setNoteFor(noteFor === r.id ? "" : r.id)}>
+        <Button variant="outline" size="sm" onClick={() => setNoteFor(noteFor === r.id ? "" : r.id)}>
           {t("town.leaveNote", { defaultValue: "Leave a note" })}
         </Button>
-        {r.office !== "mayor" && r.status === "active" && <Button variant="ghost" size="sm" onClick={() => setLeaving(leaving === r.id ? "" : r.id)}>
+        {r.office !== "mayor" && r.status === "active" && <Button variant="outline" size="sm" onClick={() => setLeaving(leaving === r.id ? "" : r.id)}>
           {t("town.moveAway", { defaultValue: "Move away" })}
         </Button>}
         {leaving === r.id && <div role="group" className="flex w-full flex-wrap items-center gap-2 rounded-md border p-2 text-[13px]">
@@ -210,21 +223,21 @@ function ResidentsView({ town, transport, onChanged, onError }: {
           <Button type="submit" disabled={busy || !note.trim()}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.send", { defaultValue: "Send" })}</Button>
         </form>}
       </div>)}
-    </SettingsGroup>
+    </TownSection>
 
     <TasksPanel />
 
     <OfficesPanel town={town} onChanged={onChanged} onError={onError} />
 
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{t("town.board", { defaultValue: "Notice board" })}</h2>
-    <SettingsGroup>
+    <TownSection title={t("town.board", { defaultValue: "Notice board" })}
+      description={t("town.boardHelp", { defaultValue: "The Mayor's posts for you: open roles, requests and move-in requests (decide them in Review)." })}>
       {town.board.length === 0
         ? <p className="settings-list-row py-3 text-[13px] text-muted-foreground">{t("town.boardEmpty", { defaultValue: "Nothing open on the board." })}</p>
         : town.board.map((post, index) => <div key={index} className="settings-list-row py-3">
           <span className="block text-[13px]">{post.text}</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">{post.kind} · {post.author}</span>
         </div>)}
-    </SettingsGroup>
+    </TownSection>
 
     <UpkeepView town={town} transport={transport} onChanged={onChanged} onError={onError} />
 
@@ -254,8 +267,8 @@ function UpkeepView({ town, transport, onChanged, onError }: {
         : up.waiting_for ? t("town.upkeepWaiting", { defaultValue: "Waiting, because {{why}}.", why: up.waiting_for })
           : t("town.upkeepStarting", { defaultValue: "Starting shortly." });
   return <>
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{t("town.upkeep", { defaultValue: "Upkeep" })}</h2>
-    <SettingsGroup>
+    <TownSection title={t("town.upkeep", { defaultValue: "Upkeep" })}
+      description={t("town.upkeepAbout", { defaultValue: "Babo's own work: memory reviews, curation and the rounds, when the model is free." })}>
       <div className="settings-list-row flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
         <span className="min-w-[14rem] flex-1">
           <span className="block text-[13px]">{state}</span>
@@ -264,7 +277,7 @@ function UpkeepView({ town, transport, onChanged, onError }: {
             {t("town.upkeepHow", { defaultValue: "Memory reviews and curation wait until nobody has used the model for {{minutes}} minutes; everything waiting is done in quiet hours ({{hours}}).", minutes: up.wait_minutes, hours: up.quiet_hours })}
           </span>
         </span>
-        <Button variant="secondary" disabled={busy || up.catch_up_requested || up.running || up.service !== "running"} onClick={() => void catchUp()}>
+        <Button variant="outline" disabled={busy || up.catch_up_requested || up.running || up.service !== "running"} onClick={() => void catchUp()}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : up.catch_up_requested ? t("town.catchUpAsked", { defaultValue: "Catch-up requested" }) : t("town.catchUp", { defaultValue: "Catch up now" })}
         </Button>
         <ActivityLine activityKey="upkeep" />
@@ -277,7 +290,7 @@ function UpkeepView({ town, transport, onChanged, onError }: {
           <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{town.last_upkeep.log}</pre>
         </details>
         : <p className="settings-list-row py-3 text-[13px] text-muted-foreground">{t("town.noUpkeep", { defaultValue: "No upkeep has run yet." })}</p>}
-    </SettingsGroup>
+    </TownSection>
   </>;
 }
 
@@ -291,23 +304,21 @@ function TownNameForm({ current, transport, onChanged, onError }: {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(current);
   const [busy, setBusy] = useState(false);
-  if (!open) {
-    return <p className="settings-list-inset text-xs text-muted-foreground">
-      {t("town.nameHint", { defaultValue: "The residents usually choose the town's name. You can also" })}{" "}
-      <button type="button" className="underline underline-offset-2" onClick={() => setOpen(true)}>{t("town.nameItYourself", { defaultValue: "name it yourself" })}</button>.
-    </p>;
-  }
   const save = async () => {
     setBusy(true);
     try { onChanged(await nameTown(transport, name)); setOpen(false); }
     catch (reason) { onError(errorText(reason)); }
     finally { setBusy(false); }
   };
-  return <form className="settings-list-inset flex gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-    <Input autoFocus value={name} maxLength={60} onChange={(event) => setName(event.target.value)} aria-label={t("town.nameLabel", { defaultValue: "Town name" })} />
-    <Button type="submit" disabled={busy || !name.trim()}>{t("town.saveName", { defaultValue: "Save" })}</Button>
-    <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("town.cancel", { defaultValue: "Cancel" })}</Button>
-  </form>;
+  return <TownSection title={t("town.nameTitle", { defaultValue: "The town's name" })}
+    description={t("town.nameHint", { defaultValue: "The residents usually choose it, by proposal. You can also name it yourself." })}
+    actions={!open && <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>{t("town.nameItYourself", { defaultValue: "Name it yourself" })}</Button>}>
+    {open && <form className="settings-list-row flex gap-2 py-3" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <Input autoFocus value={name} maxLength={60} onChange={(event) => setName(event.target.value)} aria-label={t("town.nameLabel", { defaultValue: "Town name" })} />
+      <Button type="submit" disabled={busy || !name.trim()}>{t("town.saveName", { defaultValue: "Save" })}</Button>
+      <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("town.cancel", { defaultValue: "Cancel" })}</Button>
+    </form>}
+  </TownSection>;
 }
 
 function ReviewView({ token, transport, onChanged, onError }: {
@@ -333,10 +344,11 @@ function ReviewView({ token, transport, onChanged, onError }: {
   const leaving = review.leaving ?? [];
   const empty = !review.sessions.length && !review.tools.length && !review.proposals.length && !review.founding.length && !review.flags.length && !leaving.length;
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.reviewIntro", { defaultValue: "Nothing changes unless you decide. Whatever reason you give goes to the resident concerned. This is not an audit of anyone's memory." })}
-    </p>
-    {empty && <p className="settings-list-inset text-[13px]">{t("town.reviewEmpty", { defaultValue: "Nothing is waiting for you." })}</p>}
+    </TownIntro>
+    {empty && <TownSection title={t("town.reviewEmpty", { defaultValue: "Nothing is waiting for you." })}
+      description={t("town.reviewEmptyHelp", { defaultValue: "Proposals, tools, move-in and move-away requests, errands and old flags come here when they need your decision." })} />}
     {review.sessions.length > 0 && <ReviewSection title={t("town.review.sessions", { defaultValue: "Errands" })}>
       {review.sessions.map((r) => <DecisionCard key={r.id} kind="session" id={r.id} digest={r.digest} onDecide={decide}
         heading={t("town.sessionRequest", { defaultValue: "{{who}} wants to send {{resident}} on an errand", who: r.requested_by, resident: r.resident })}
@@ -421,10 +433,7 @@ function ReviewView({ token, transport, onChanged, onError }: {
 }
 
 function ReviewSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return <>
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{title}</h2>
-    <SettingsGroup>{children}</SettingsGroup>
-  </>;
+  return <TownSection title={title} tone="attention">{children}</TownSection>;
 }
 
 function Expandable({ label, text, code = false, open = false }: { label: string; text: string; code?: boolean; open?: boolean }) {
@@ -449,23 +458,26 @@ function DoctorView({ token }: { token: () => string }) {
     finally { setRunning(false); }
   };
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.doctorIntro", { defaultValue: "Checks every part of the town: the model, the queue, tool calling, memory, search, the residents and git. It never writes into a resident's memory. Same as `babo doctor`." })}
-    </p>
-    <div className="settings-list-inset">
-      <Button onClick={() => void run()} disabled={running} className="gap-2">
+    </TownIntro>
+    <TownSection title={t("town.doctorChecks", { defaultValue: "Checks" })}
+      description={report ? (report.ok ? t("town.doctorOk", { defaultValue: "Everything that matters passed." }) : t("town.doctorNotOk", { defaultValue: "Something failed: see below." }))
+        : t("town.doctorNotRun", { defaultValue: "Not run yet in this window." })}
+      tone={report && !report.ok ? "attention" : "plain"}
+      actions={<Button onClick={() => void run()} disabled={running} className="gap-2">
         {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stethoscope className="h-4 w-4" />}
         {running ? t("town.doctorRunning", { defaultValue: "Checking… (this talks to the model and can take a minute)" }) : t("town.runDoctor", { defaultValue: "Run the doctor" })}
-      </Button>
-    </div>
-    {error && <p role="alert" className="settings-list-inset text-[13px] text-destructive">{error}</p>}
-    {report && <SettingsGroup>
+      </Button>}>
+    {error && <p role="alert" className="settings-list-row py-2 text-[13px] text-destructive">{error}</p>}
+    {report && <>
       {report.checks.map((check) => <div key={check.name} className="settings-list-row flex items-start gap-3 py-3">
         <span className={cn("w-12 shrink-0 text-xs font-semibold", check.status === "PASS" ? "text-emerald-600" : check.status === "WARN" ? "text-amber-600" : "text-destructive")}>{check.status}</span>
         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{check.name}</span>
           <span className="mt-0.5 block break-words text-xs text-muted-foreground">{check.detail}</span></span>
       </div>)}
-    </SettingsGroup>}
+    </>}
+    </TownSection>
     <EvalPanel />
   </>;
 }
@@ -496,25 +508,30 @@ function TownSettingsView({ token, transport, onNotice, onError }: {
     finally { setBusy(false); }
   };
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.settingsIntro", { defaultValue: "The town's own settings. The same list is available with `babo settings`. Your config file is backed up before each change." })}
-    </p>
-    <SettingsGroup>
-      {settings.map((s) => <label key={s.key} className="settings-list-row flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+    </TownIntro>
+    <TownSection title={t("town.settingsTitle", { defaultValue: "The town's settings" })}
+      description={Object.keys(changes).length
+        ? t("town.settingsUnsaved", { defaultValue: "{{count}} unsaved change(s).", count: Object.keys(changes).length })
+        : t("town.settingsSaved", { defaultValue: "Everything is saved." })}
+      actions={<Button disabled={busy || Object.keys(changes).length === 0} onClick={() => void save()}>
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.saveSettings", { defaultValue: "Save settings" })}
+      </Button>}>
+      {settings.map((s) => <label key={s.key} className={cn("settings-list-row flex flex-wrap items-center gap-x-4 gap-y-2 py-3 transition-colors",
+        s.key in changes && "bg-primary/5")}>
         <span className="min-w-[14rem] flex-1">
           <span className="block text-[14px] font-medium">{s.label}</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">{s.help}</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">{t("town.applies", { defaultValue: "Takes effect {{when}}.", when: s.applies })}</span>
         </span>
-        <Input className="w-40" inputMode={s.kind === "int" ? "numeric" : undefined} placeholder={s.kind === "hours" ? "HH:MM-HH:MM" : undefined}
-          value={draft[s.key] ?? String(s.value)} onChange={(event) => setDraft((current) => ({ ...current, [s.key]: event.target.value }))} />
+        {s.kind === "int" && s.range
+          ? <Slider className="w-64" ariaLabel={s.label} min={s.range[0]} max={s.range[1]} step={s.range[2]}
+            value={Number(draft[s.key] ?? s.value)} onChange={(value) => setDraft((current) => ({ ...current, [s.key]: String(value) }))} />
+          : <Input className="w-40" inputMode={s.kind === "int" ? "numeric" : undefined} placeholder={s.kind === "hours" ? "HH:MM-HH:MM" : undefined}
+            value={draft[s.key] ?? String(s.value)} onChange={(event) => setDraft((current) => ({ ...current, [s.key]: event.target.value }))} />}
       </label>)}
-    </SettingsGroup>
-    <div className="settings-list-inset">
-      <Button disabled={busy || Object.keys(changes).length === 0} onClick={() => void save()}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.saveSettings", { defaultValue: "Save settings" })}
-      </Button>
-    </div>
+    </TownSection>
     <GuidesPanel />
   </>;
 }
@@ -544,9 +561,9 @@ function ProfilesView({ token, transport, onNotice, onError }: {
     finally { setBusy(""); }
   };
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.profilesIntro", { defaultValue: "What each agent may do. Keys and providers are set once in Settings; a profile decides which agents may use them. The same profiles are available with `babo profile`." })}
-    </p>
+    </TownIntro>
     {profiles.map((profile) => <ProfileCard key={profile.agent} profile={profile} presets={presets} busy={busy === profile.agent}
       onChange={(changes) => void change(profile.agent, changes)} />)}
   </>;
@@ -574,14 +591,10 @@ function ProfileCard({ profile, presets, busy, onChange }: {
     ? t("town.profileMayorHelp", { defaultValue: "Babo's main agent. The same profile applies to every Mayor session, in the web interface, the terminal and chat apps. The Mayor uses Babo's model, set in Settings › Models." })
     : template ? t("town.profileNewHelp", { defaultValue: "What a newly founded resident starts with. Changing it doesn't change residents who already live here." })
       : t("town.profileResidentHelp", { defaultValue: "A resident. Its sessions start from this profile." });
-  return <section aria-label={title} className="mt-2">
-    <h2 className="settings-list-inset flex items-center gap-2 text-[13px] font-medium text-foreground">
-      {title}
+  return <TownSection title={title} description={subtitle} badges={<>
       {profile.main && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">{t("town.mainAgent", { defaultValue: "Main agent" })}</span>}
       {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-    </h2>
-    <p className="settings-list-inset mb-1 text-xs text-muted-foreground">{subtitle}</p>
-    <SettingsGroup>
+    </>}>
       {profile.capabilities.map((cap) => <div key={cap.key} className="settings-list-row flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
         <span className="min-w-[14rem] flex-1">
           <span className="block text-[14px] font-medium">{cap.label}</span>
@@ -617,15 +630,24 @@ function ProfileCard({ profile, presets, busy, onChange }: {
           <PresetSelect presets={presets} value={model} onChange={setModel}
             emptyLabel={t("town.presetDefault", { defaultValue: "Babo's default" })} />
         </label>}
-        {(["checkpoint_every_tool_calls", "idle_minutes"] as const).map((key) => <label key={key} className="flex flex-col gap-1 text-xs text-muted-foreground">
-          {key === "idle_minutes" ? t("town.profileIdle", { defaultValue: "Checkpoint after … quiet minutes" }) : t("town.profileEvery", { defaultValue: "Checkpoint every … tool calls" })}
-          <Input className="w-40" inputMode="numeric" placeholder={`${profile.memory_defaults[key]} (${t("town.babowide", { defaultValue: "Babo-wide" })})`}
-            value={memory[key] ?? String(profile.memory[key] ?? "")} onChange={(event) => setMemory((current) => ({ ...current, [key]: event.target.value }))} />
-        </label>)}
-        <Button type="submit" variant="secondary" disabled={busy || Object.keys(textChanges).length === 0}>{t("town.save", { defaultValue: "Save" })}</Button>
+        {(["checkpoint_every_tool_calls", "idle_minutes"] as const).map((key) => {
+          const label = key === "idle_minutes" ? t("town.profileIdle", { defaultValue: "Checkpoint after … quiet minutes" }) : t("town.profileEvery", { defaultValue: "Checkpoint every … tool calls" });
+          const raw = memory[key] ?? String(profile.memory[key] ?? "");
+          const own = raw !== "" && raw !== "default";
+          return <div key={key} className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <span className="flex items-center justify-between gap-2">{label}
+              {own && <Button type="button" variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => setMemory((current) => ({ ...current, [key]: "" }))}>
+                {t("town.useBabowide", { defaultValue: "Use Babo-wide ({{value}})", value: profile.memory_defaults[key] })}
+              </Button>}
+            </span>
+            <Slider className="w-64" ariaLabel={`${title}: ${label}`} min={key === "idle_minutes" ? 1 : 3} max={key === "idle_minutes" ? 240 : 100}
+              value={own ? Number(raw) : profile.memory_defaults[key]} onChange={(value) => setMemory((current) => ({ ...current, [key]: String(value) }))} />
+            {!own && <span>{t("town.followsBabowide", { defaultValue: "Babo-wide, for now" })}</span>}
+          </div>;
+        })}
+        <Button type="submit" variant="outline" disabled={busy || Object.keys(textChanges).length === 0}>{t("town.save", { defaultValue: "Save" })}</Button>
       </form>
-    </SettingsGroup>
-  </section>;
+  </TownSection>;
 }
 
 
@@ -642,14 +664,14 @@ function FoldersRow({ folders, busy, onChange }: { folders: string[]; busy: bool
     {folders.length > 0 && <ul className="mt-2 flex flex-col gap-1">
       {folders.map((folder) => <li key={folder} className="flex items-center gap-2 text-[13px]">
         <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{folder}</code>
-        <Button type="button" variant="ghost" size="sm" disabled={busy} aria-label={t("town.removeFolder", { defaultValue: "Remove {{folder}}", folder })}
+        <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={t("town.removeFolder", { defaultValue: "Remove {{folder}}", folder })}
           onClick={() => onChange(folders.filter((f) => f !== folder))}>{t("town.remove", { defaultValue: "Remove" })}</Button>
       </li>)}
     </ul>}
     <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); if (adding.trim()) { onChange([...folders, adding.trim()]); setAdding(""); } }}>
       <Input className="min-w-[16rem] flex-1" value={adding} onChange={(event) => setAdding(event.target.value)} placeholder="~/code/garden"
         aria-label={t("town.addFolder", { defaultValue: "A folder to add" })} />
-      <Button type="submit" variant="secondary" disabled={busy || !adding.trim()}>{t("town.add", { defaultValue: "Add" })}</Button>
+      <Button type="submit" variant="outline" disabled={busy || !adding.trim()}>{t("town.add", { defaultValue: "Add" })}</Button>
     </form>
   </div>;
 }
@@ -697,9 +719,9 @@ function SessionsView({ token, transport, onNotice, onError, focus = null }: {
   };
   return <>
     <NoticesPanel />
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.sessionsIntro", { defaultValue: "Residents other than the Mayor work in opencode. Each session starts from the resident's profile; freezing one stops it, and resuming it continues exactly where it was; removing one drops it for good. In the terminal: `babo session open <resident>`." })}
-    </p>
+    </TownIntro>
     <p className="settings-list-inset text-[13px]">
       <button type="button" className="underline underline-offset-2 text-muted-foreground" onClick={() => setArchived((v) => !v)}>
         {archived ? t("town.showCurrent", { defaultValue: "Back to current sessions" }) : t("town.showArchived", { defaultValue: "Show archived sessions" })}
@@ -709,9 +731,8 @@ function SessionsView({ token, transport, onNotice, onError, focus = null }: {
       {t("town.noOpencode", { defaultValue: "opencode isn't installed where Babo runs, so residents' sessions can't start. Install it in the box with: curl -fsSL https://opencode.ai/install | bash" })}
     </p>}
     {data.residents.length === 0 && <p className="settings-list-inset text-[13px]">{t("town.noResidents", { defaultValue: "Only the Mayor lives here so far." })}</p>}
-    {data.residents.map((r) => <section key={r.id} aria-label={r.name || r.id} className="mt-2">
-      <h2 className="settings-list-inset text-[13px] font-medium text-foreground">{r.name ? `${r.name} (${r.id})` : r.id} · <span className="text-muted-foreground">{r.office}</span></h2>
-      <SettingsGroup>
+    {data.residents.map((r) => <TownSection key={r.id} title={r.name || r.id}
+      badges={<span className="text-xs font-normal text-muted-foreground">{r.name ? `${r.id} · ` : ""}{r.office}</span>}>
         {r.sessions.map((s) => <SessionRow key={s.id} session={s} presets={data.presets ?? []} busy={busy === s.id}
           focused={focus?.resident === r.id && focus.id === s.id}
           onAction={(action, extra) => void act(s.id, action, { resident: r.id, id: s.id, ...extra })}
@@ -719,8 +740,7 @@ function SessionsView({ token, transport, onNotice, onError, focus = null }: {
         <NewSessionForm resident={r.id} presets={data.presets ?? []} folders={r.folders ?? []} disabled={!data.opencode || busy === `new:${r.id}`} busy={busy === `new:${r.id}`}
           onStart={(task, overrides, doneCheck, folder) => void act(`new:${r.id}`, "new",
             { resident: r.id, task, overrides, ...(doneCheck.trim() ? { done_check: doneCheck.trim() } : {}), ...(folder ? { folder } : {}) })} />
-      </SettingsGroup>
-    </section>)}
+    </TownSection>)}
   </>;
 }
 
@@ -776,19 +796,19 @@ function SessionRow({ session, presets, busy, onAction, onOpen, focused = false 
         {t("town.sessionOpenNow", { defaultValue: "open now (in {{count}} place(s)): it won't be wrapped up while you're there", count: session.presence?.connections ?? 0 })}
       </span>}
     </span>
-    {running && <Button variant="secondary" size="sm" onClick={onOpen}>{t("town.openSession", { defaultValue: "Open" })}</Button>}
-    {running && live.state === "working" && <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("stop")}>{t("town.stopTurn", { defaultValue: "Stop" })}</Button>}
-    {running && <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("checkpoint")}>{t("town.checkpointNow", { defaultValue: "Checkpoint now" })}</Button>}
+    {running && <Button variant="outline" size="sm" onClick={onOpen}>{t("town.openSession", { defaultValue: "Open" })}</Button>}
+    {running && live.state === "working" && <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("stop")}>{t("town.stopTurn", { defaultValue: "Stop" })}</Button>}
+    {running && <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("checkpoint")}>{t("town.checkpointNow", { defaultValue: "Checkpoint now" })}</Button>}
     {running
-      ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("freeze")}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.freeze", { defaultValue: "Freeze" })}</Button>
-      : <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("resume")}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.resume", { defaultValue: "Resume" })}</Button>}
+      ? <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("freeze")}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.freeze", { defaultValue: "Freeze" })}</Button>
+      : <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("resume")}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("town.resume", { defaultValue: "Resume" })}</Button>}
     {!running && (session.archived
-      ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("unarchive")}>{t("town.unarchive", { defaultValue: "Unarchive" })}</Button>
-      : <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("archive")}>{t("town.archive", { defaultValue: "Archive" })}</Button>)}
-    <Button variant="ghost" size="sm" disabled={busy} onClick={() => onAction("organize", { pinned: !session.pinned })}>
+      ? <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("unarchive")}>{t("town.unarchive", { defaultValue: "Unarchive" })}</Button>
+      : <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("archive")}>{t("town.archive", { defaultValue: "Archive" })}</Button>)}
+    <Button variant="outline" size="sm" disabled={busy} onClick={() => onAction("organize", { pinned: !session.pinned })}>
       {session.pinned ? t("town.unpin", { defaultValue: "Unpin" }) : t("town.pin", { defaultValue: "Pin" })}
     </Button>
-    <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setName(session.title); setTags((session.tags ?? []).join(", ")); setOrganizing((v) => !v); }}>
+    <Button variant="outline" size="sm" disabled={busy} onClick={() => { setName(session.title); setTags((session.tags ?? []).join(", ")); setOrganizing((v) => !v); }}>
       {t("town.renameTag", { defaultValue: "Rename / tags" })}
     </Button>
     <ActivityLine activityKey={`checkpoint:${session.resident}:${session.id}`} />
@@ -814,7 +834,7 @@ function SessionRow({ session, presets, busy, onAction, onOpen, focused = false 
         aria-label={t("town.sessionName", { defaultValue: "Session name" })} />
       <Input className="min-w-[12rem] flex-1" value={tags} maxLength={400} onChange={(event) => setTags(event.target.value)}
         aria-label={t("town.sessionTags", { defaultValue: "Tags" })} placeholder={t("town.sessionTagsPlaceholder", { defaultValue: "Tags, separated by commas" })} />
-      <Button type="submit" size="sm" variant="secondary" disabled={busy || !name.trim()}>{t("town.save", { defaultValue: "Save" })}</Button>
+      <Button type="submit" size="sm" variant="outline" disabled={busy || !name.trim()}>{t("town.save", { defaultValue: "Save" })}</Button>
     </form>}
     {removing
       ? <span role="group" aria-label={t("town.removeSession", { defaultValue: "Remove" })} className="flex basis-full flex-wrap items-center justify-end gap-2 text-xs">
@@ -822,21 +842,21 @@ function SessionRow({ session, presets, busy, onAction, onOpen, focused = false 
         <Button variant="destructive" size="sm" disabled={busy} onClick={() => { setRemoving(false); onAction("remove"); }}>{t("town.removeConfirm", { defaultValue: "Remove for good" })}</Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(false)}>{t("town.keepSession", { defaultValue: "Keep it" })}</Button>
       </span>
-      : <Button variant="ghost" size="sm" disabled={busy} className="text-muted-foreground" onClick={() => setRemoving(true)}>{t("town.removeSession", { defaultValue: "Remove" })}</Button>}
+      : <Button variant="outline" size="sm" disabled={busy} className="text-muted-foreground" onClick={() => setRemoving(true)}>{t("town.removeSession", { defaultValue: "Remove" })}</Button>}
     {live.questions.map((q) => <div key={q.id} role="alert" className="basis-full rounded-lg border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs">
       <p className="font-medium text-amber-700 dark:text-amber-300">{t("town.sessionAsks", { defaultValue: "It asks to {{action}}:", action: q.action })} <code>{q.resources.join(" · ")}</code></p>
       {q.message && <p className="mt-1 text-muted-foreground">{q.message}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         <Button size="sm" disabled={busy} onClick={() => onAction("answer", { request: q.id, decision: "once" })}>{t("town.allowOnce", { defaultValue: "Allow once" })}</Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onAction("answer", { request: q.id, decision: "always" })}>{t("town.allowSession", { defaultValue: "Allow for this session" })}</Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAction("answer", { request: q.id, decision: "reject" })}>{t("town.refuse", { defaultValue: "Refuse" })}</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => onAction("answer", { request: q.id, decision: "reject" })}>{t("town.refuse", { defaultValue: "Refuse" })}</Button>
       </div>
     </div>)}
     {running && <form className="flex basis-full flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (message.trim()) { onAction("send", { text: message }); setMessage(""); } }}>
       <Input className="min-w-[14rem] flex-1" value={message} maxLength={20000} onChange={(event) => setMessage(event.target.value)}
         aria-label={t("town.sendLabel", { defaultValue: "Send {{who}} a message", who: session.resident })}
         placeholder={t("town.sendPlaceholder", { defaultValue: "Send a message (it works on it on its own)" })} />
-      <Button type="submit" size="sm" variant="secondary" disabled={busy || !message.trim()}>{t("town.send", { defaultValue: "Send" })}</Button>
+      <Button type="submit" size="sm" variant="outline" disabled={busy || !message.trim()}>{t("town.send", { defaultValue: "Send" })}</Button>
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         {t("town.sessionModel", { defaultValue: "Model" })}
         <PresetSelect presets={presets} value={session.overrides.model ?? ""} emptyLabel={t("town.asProfile", { defaultValue: "as in the profile" })}

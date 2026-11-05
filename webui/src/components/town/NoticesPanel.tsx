@@ -36,7 +36,7 @@ export function NoticesPanel({ className = "" }: { className?: string }) {
       <p className="flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300">
         <BellRing className="h-3.5 w-3.5" aria-hidden />{t("notices.label", { defaultValue: "Notices" })}
       </p>
-      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void read()}>{t("notices.readAll", { defaultValue: "Mark all read" })}</Button>
+      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void read()}>{t("notices.readAll", { defaultValue: "Mark all read" })}</Button>
     </div>
     <ul className="space-y-1 py-1">
       {notices.map((n) => <li key={n.id} className="flex items-start justify-between gap-2 text-[13px]">
