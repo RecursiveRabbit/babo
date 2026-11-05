@@ -855,3 +855,30 @@ def test_what_a_round_step_was_refused_comes_back_with_its_turn(town: Town, conf
     turn = opencode.one_turn(town, cfg, "archivist", "List the root.", kind="round", config_path=path,
                              access={"shell": "deny"}, commands=["ls /tmp"])
     assert turn == "I couldn't list it." and turn.refused == [{"tool": "shell", "what": "ls /"}]  # type: ignore[attr-defined]
+
+
+@live
+def test_a_session_works_in_a_folder_outside_the_town_and_nowhere_else(town: Town, config_file, mock_llama: MockLlama,
+                                                                      tmp_path: Path) -> None:
+    from babo.baton import profiles, views
+
+    path, cfg = config_file()
+    project = tmp_path / "machine" / "code" / "garden"
+    project.mkdir(parents=True)
+    beside = project.parent / "other"
+    beside.mkdir()
+    with pytest.raises(BatonError, match="isn't one of the folders"):
+        opencode.new_session(town, cfg, "archivist", title="x", folder=str(project))
+    views.update_profile(town, cfg.baton, "archivist", {"files": "allow", "folders": [str(project)]}, [])
+    assert profiles.load(town, cfg.baton, "archivist", "archivist").folders == [str(project.resolve())]
+    mock_llama.default = _router([tool_call("write", {"path": str(project / "plan.md"), "content": "# Plan\n"}),
+                                  tool_call("write", {"path": str(beside / "taken.md"), "content": "x"}), text("Done.")])
+    session = opencode.new_session(town, cfg, "archivist", title="garden", folder=str(project))
+    try:
+        assert opencode.workdir(town, session) == project.resolve()
+        turn = opencode.send(town, cfg, session, "Write the plan.", config_path=path)
+        assert (project / "plan.md").read_text() == "# Plan\n"
+        assert not (beside / "taken.md").exists()  # outside its folder: refused
+        assert turn.refused  # type: ignore[attr-defined]
+    finally:
+        opencode.freeze(town, session)

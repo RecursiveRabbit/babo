@@ -610,6 +610,7 @@ function ProfileCard({ profile, presets, busy, onChange }: {
             {name}
           </label>)}</span>}
       </div>
+      {!profile.main && profile.folders !== undefined && <FoldersRow folders={profile.folders} busy={busy} onChange={(folders) => onChange({ folders })} />}
       <form className="settings-list-row flex flex-wrap items-end gap-x-4 gap-y-3 py-3" onSubmit={(event) => { event.preventDefault(); if (Object.keys(textChanges).length) onChange(textChanges); }}>
         {!profile.main && <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           {t("town.profileModel", { defaultValue: "Model" })}
@@ -628,6 +629,30 @@ function ProfileCard({ profile, presets, busy, onChange }: {
 }
 
 
+
+/** Folders outside the town (a project on the machine) a session of this resident's may be given to work in. */
+function FoldersRow({ folders, busy, onChange }: { folders: string[]; busy: boolean; onChange: (folders: string[]) => void }) {
+  const { t } = useTranslation();
+  const [adding, setAdding] = useState("");
+  return <div className="settings-list-row py-3">
+    <span className="block text-[14px] font-medium">{t("town.folders", { defaultValue: "Folders outside the town" })}</span>
+    <span className="mt-0.5 block text-xs text-muted-foreground">
+      {t("town.foldersHelp", { defaultValue: "A project on the machine a session of its may be given to work in (Sessions › Works in). Its file tools then work there, and only there." })}
+    </span>
+    {folders.length > 0 && <ul className="mt-2 flex flex-col gap-1">
+      {folders.map((folder) => <li key={folder} className="flex items-center gap-2 text-[13px]">
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{folder}</code>
+        <Button type="button" variant="ghost" size="sm" disabled={busy} aria-label={t("town.removeFolder", { defaultValue: "Remove {{folder}}", folder })}
+          onClick={() => onChange(folders.filter((f) => f !== folder))}>{t("town.remove", { defaultValue: "Remove" })}</Button>
+      </li>)}
+    </ul>}
+    <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); if (adding.trim()) { onChange([...folders, adding.trim()]); setAdding(""); } }}>
+      <Input className="min-w-[16rem] flex-1" value={adding} onChange={(event) => setAdding(event.target.value)} placeholder="~/code/garden"
+        aria-label={t("town.addFolder", { defaultValue: "A folder to add" })} />
+      <Button type="submit" variant="secondary" disabled={busy || !adding.trim()}>{t("town.add", { defaultValue: "Add" })}</Button>
+    </form>
+  </div>;
+}
 
 /** Residents other than the Mayor run in opencode, one session at a time or several.
  *  The same as `babo session list|new|open|freeze`. */
@@ -691,9 +716,9 @@ function SessionsView({ token, transport, onNotice, onError, focus = null }: {
           focused={focus?.resident === r.id && focus.id === s.id}
           onAction={(action, extra) => void act(s.id, action, { resident: r.id, id: s.id, ...extra })}
           onOpen={() => openSession(r.id, s.id)} />)}
-        <NewSessionForm resident={r.id} presets={data.presets ?? []} disabled={!data.opencode || busy === `new:${r.id}`} busy={busy === `new:${r.id}`}
-          onStart={(task, overrides, doneCheck) => void act(`new:${r.id}`, "new",
-            { resident: r.id, task, overrides, ...(doneCheck.trim() ? { done_check: doneCheck.trim() } : {}) })} />
+        <NewSessionForm resident={r.id} presets={data.presets ?? []} folders={r.folders ?? []} disabled={!data.opencode || busy === `new:${r.id}`} busy={busy === `new:${r.id}`}
+          onStart={(task, overrides, doneCheck, folder) => void act(`new:${r.id}`, "new",
+            { resident: r.id, task, overrides, ...(doneCheck.trim() ? { done_check: doneCheck.trim() } : {}), ...(folder ? { folder } : {}) })} />
       </SettingsGroup>
     </section>)}
   </>;
@@ -741,6 +766,7 @@ function SessionRow({ session, presets, busy, onAction, onOpen, focused = false 
         {live.activity ? ` · ${live.activity}` : ""}
         {" · "}{t("town.lastActive", { defaultValue: "last active {{when}}", when: when(session.last_active) })}
         {changes ? ` · ${t("town.sessionChanges", { defaultValue: "this session: {{changes}}", changes })}` : ""}
+        {session.folder ? ` · ${t("town.worksIn", { defaultValue: "works in {{folder}}", folder: session.folder })}` : ""}
         {session.done_check ? ` · ${{
           passed: t("town.donePassed", { defaultValue: "done-check passed" }),
           failed: t("town.doneFailed", { defaultValue: "done-check still failing" }),
@@ -836,24 +862,32 @@ function PresetSelect({ presets, value, onChange, emptyLabel }: {
   </select>;
 }
 
-function NewSessionForm({ resident, presets, disabled, busy, onStart }: {
+function NewSessionForm({ resident, presets, folders, disabled, busy, onStart }: {
   resident: string;
   presets: TownPreset[];
+  folders: { value: string; label: string }[];
   disabled: boolean;
   busy: boolean;
-  onStart: (task: string, overrides: Record<string, string>, doneCheck: string) => void;
+  onStart: (task: string, overrides: Record<string, string>, doneCheck: string, folder: string) => void;
 }) {
   const { t } = useTranslation();
   const [title, setTitle] = useState("");  // the task: what it should do
   const [doneCheck, setDoneCheck] = useState("");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
-  return <form className="settings-list-row flex flex-col gap-3 py-3" onSubmit={(event) => { event.preventDefault(); onStart(title, overrides, doneCheck); setTitle(""); setOverrides({}); setDoneCheck(""); }}>
+  const [folder, setFolder] = useState("");
+  return <form className="settings-list-row flex flex-col gap-3 py-3" onSubmit={(event) => { event.preventDefault(); onStart(title, overrides, doneCheck, folder); setTitle(""); setOverrides({}); setDoneCheck(""); setFolder(""); }}>
     <div className="flex flex-wrap gap-2">
       <Input className="min-w-[14rem] flex-1" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)}
         aria-label={t("town.sessionTask", { defaultValue: "What should {{who}} do?", who: resident })}
         placeholder={t("town.sessionTaskPlaceholder", { defaultValue: "What should it do? It starts right away (leave empty for an idle session)" })} />
       <Button type="submit" disabled={disabled}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : title.trim() ? t("town.startTask", { defaultValue: "Start" }) : t("town.newSession", { defaultValue: "New session" })}</Button>
     </div>
+    {folders.length > 1 && <label className="flex flex-wrap items-center gap-2 text-[13px]">
+      {t("town.sessionFolder", { defaultValue: "Works in" })}
+      <select className="rounded border bg-background px-1 py-1 text-[13px]" value={folder} onChange={(event) => setFolder(event.target.value)}>
+        {folders.map((f) => <option key={f.value} value={f.value}>{f.value ? f.label : t("town.ownFolder", { defaultValue: "its own folder" })}</option>)}
+      </select>
+    </label>}
     {title.trim() && <Input value={doneCheck} maxLength={2000} onChange={(event) => setDoneCheck(event.target.value)}
       aria-label={t("town.doneCheck", { defaultValue: "Done when this command succeeds" })}
       placeholder={t("town.doneCheckPlaceholder", { defaultValue: "Optional: done when this command succeeds in its folder, e.g. pytest -q or test -f index.md" })} />}

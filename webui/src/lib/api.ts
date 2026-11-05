@@ -1819,6 +1819,8 @@ export interface TownProfile {
   mcp: string[];
   mcp_known: string[];
   model: string;
+  /** Folders outside the town a session of its may be given to work in (older Babo: absent). */
+  folders?: string[];
   memory: { checkpoint_every_tool_calls: number | null; idle_minutes: number | null };
   memory_defaults: { checkpoint_every_tool_calls: number; idle_minutes: number };
 }
@@ -1847,6 +1849,8 @@ export interface TownSession {
   resident: string;
   id: string;
   title: string;
+  /** Where it works ("" or absent: the resident's own folder). */
+  folder?: string;
   kind: string;
   opencode_id: string;
   status: "new" | "running" | "frozen";
@@ -1904,7 +1908,9 @@ export function readTownNotices(transport: WebUIMutationTransport, ids?: string[
 export interface TownSessions {
   presets: TownPreset[];
   opencode: boolean;
-  residents: { id: string; name: string; office: string; sessions: TownSession[] }[];
+  residents: { id: string; name: string; office: string; sessions: TownSession[];
+    /** Where a new session may work: its own folder (""), its projects, folders outside the town its profile lists. */
+    folders?: { value: string; label: string }[] }[];
 }
 
 export function fetchTownSessions(token: string, base: string = "", archived = false): Promise<TownSessions> {

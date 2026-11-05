@@ -131,6 +131,37 @@ describe("town page", () => {
     await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.profile", { agent: "archivist", changes: { model: "cloud" } }, expect.any(Number)));
   });
 
+  it("lets a resident work in a folder outside the town, like `babo profile archivist folders=…` and `babo session new --folder`", async () => {
+    const withFolders = [profiles[0], { ...profile("archivist", false, "deny"), folders: ["/home/robin/code/garden"] }];
+    const folderSessions = { ...sessions, residents: [{ ...sessions.residents[0],
+      sessions: [{ ...sessions.residents[0].sessions[0], folder: "/home/robin/code/garden" }],
+      folders: [{ value: "", label: "its own folder" }, { value: "projects/notes", label: "project: notes" },
+        { value: "/home/robin/code/garden", label: "/home/robin/code/garden" }] }] };
+    mocks.fetch.mockImplementation((url: string) => Promise.resolve(new Response(
+      JSON.stringify(url.endsWith("/api/town/profiles") ? { profiles: withFolders, presets } : url.endsWith("/api/town/sessions") ? folderSessions : town()),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    mocks.mutation.mockResolvedValue({ message: "Profile of archivist: Folders outside the town: …", profiles: withFolders, presets });
+    render(<TownPage onBackToChat={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Profiles" }));
+    const archivist = await screen.findByRole("region", { name: "archivist · archivist" });
+    expect(within(archivist).getByText("/home/robin/code/garden")).toBeVisible();
+    fireEvent.change(within(archivist).getByRole("textbox", { name: "A folder to add" }), { target: { value: "~/code/paper" } });
+    fireEvent.click(within(archivist).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.profile",
+      { agent: "archivist", changes: { folders: ["/home/robin/code/garden", "~/code/paper"] } }, expect.any(Number)));
+    expect(screen.queryByRole("textbox", { name: "A folder to add" })).toBeTruthy();  // (only the resident's card: the Mayor has none)
+    expect(within(screen.getByRole("region", { name: "Mayor" })).queryByText("Folders outside the town")).toBeNull();
+
+    mocks.mutation.mockResolvedValue({ ...folderSessions, message: "archivist's session is running." });
+    fireEvent.click(screen.getByRole("tab", { name: "Sessions" }));
+    const sessionsOf = await screen.findByRole("region", { name: "archivist" });
+    expect(within(sessionsOf).getByText(/works in \/home\/robin\/code\/garden/)).toBeVisible();
+    fireEvent.change(within(sessionsOf).getByRole("combobox", { name: "Works in" }), { target: { value: "projects/notes" } });
+    fireEvent.click(within(sessionsOf).getByRole("button", { name: "New session" }));
+    await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.session.new",
+      { resident: "archivist", task: "", overrides: {}, folder: "projects/notes" }, 120_000));
+  });
+
   it("shows what upkeep is waiting for and catches up on request, like `babo upkeep --now`", async () => {
     mocks.mutation.mockResolvedValue({ message: "Catch-up requested: upkeep starts within a minute and does everything that is waiting.", town: town() });
     render(<TownPage onBackToChat={() => {}} />);

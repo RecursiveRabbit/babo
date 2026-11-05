@@ -299,13 +299,15 @@ def sessions_overview(town: Town, config: Config, *, archived: bool = False) -> 
         "presets": presets_overview(config),
         "opencode": opencode.opencode_bin(config) is not None,
         "residents": [{"id": r.id, "name": "" if r.name == "unchosen" else r.name, "office": r.office,
+                       "folders": opencode.folder_choices(town, config, r.id),
                        "sessions": opencode.overview(town, r.id, archived=archived)} for r in residents],
     }
 
 
 def start_session(town: Town, config: Config, resident: str, *, title: str, overrides: dict[str, object], config_path: Any,
-                  task: str = "", done_check: str = "") -> str:
-    """Start a session. With a task, the resident starts on it right away and works on its own."""
+                  task: str = "", done_check: str = "", folder: str = "") -> str:
+    """Start a session. With a task, the resident starts on it right away and works on its own. ``folder``: where it
+    works, if not its own folder (one of its projects, or a folder outside the town its profile lists)."""
     from babo.baton import opencode
     from babo.baton.notes import first_line
 
@@ -313,7 +315,7 @@ def start_session(town: Town, config: Config, resident: str, *, title: str, over
     if done_check.strip() and not task:
         raise BatonError("A done-check goes with a task: say what the session should do.")
     session = opencode.new_session(town, config, resident, title=title.strip() or first_line(task, 80), overrides=overrides,
-                                   done_check=done_check)
+                                   done_check=done_check, folder=folder)
     if task:
         session.task = task
         opencode.save_session(town, session)
