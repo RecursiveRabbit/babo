@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { TownIntro, TownSection } from "@/components/town/TownLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { useClient } from "@/providers/ClientProvider";
 import { changeProjectBoard, fetchTownProjects, type TownProject, type TownProjects, type TownTicket } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -37,12 +38,12 @@ export function ProjectsView({ residents, onError }: { residents: string[]; onEr
   if (!board) return <p className="settings-list-inset text-[13px] text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />{t("town.loading", { defaultValue: "Loading the town…" })}</p>;
   const project = board.projects.find((p) => p.slug === open) ?? null;
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.projectsIntro", { defaultValue: "The town's projects and their tickets. Residents start projects, claim tickets and keep them up to date with project_board; in the terminal: babo projects." })}
-    </p>
+    </TownIntro>
     {said && <p role="status" className="settings-list-inset text-[13px] text-emerald-700 animate-in fade-in-0 dark:text-emerald-300">{said}</p>}
-    <section aria-label={t("town.projects", { defaultValue: "Projects" })}>
-      <SettingsGroup>
+    <TownSection title={t("town.projects", { defaultValue: "Projects" })}
+      description={t("town.projectsPick", { defaultValue: "Pick one to see its tickets." })}>
         {board.projects.length === 0 && <p className="settings-list-row py-3 text-[13px] text-muted-foreground">{t("town.noProjects", { defaultValue: "No projects yet." })}</p>}
         {board.projects.map((p) => <button key={p.slug} type="button" aria-pressed={p.slug === open} onClick={() => setOpen(p.slug === open ? "" : p.slug)}
           className={cn("settings-list-row flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5 text-left text-[13px] transition-colors hover:bg-muted/40",
@@ -59,10 +60,9 @@ export function ProjectsView({ residents, onError }: { residents: string[]; onEr
             ? <NewProject residents={residents} onCancel={() => setAdding(false)} onSubmit={async (what) => {
               if (await change(what)) { setAdding(false); setOpen(String(what.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40)); }
             }} />
-            : <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(true)}><Plus className="mr-1 h-4 w-4" />{t("town.newProject", { defaultValue: "New project" })}</Button>}
+            : <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}><Plus className="mr-1 h-4 w-4" />{t("town.newProject", { defaultValue: "New project" })}</Button>}
         </div>
-      </SettingsGroup>
-    </section>
+    </TownSection>
     {project && <ProjectBoard key={project.slug} project={project} statuses={board.statuses} projectStatuses={board.project_statuses}
       residents={residents} change={change} />}
   </>;
@@ -93,8 +93,8 @@ function NewProject({ residents, onSubmit, onCancel }: {
           {residents.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </label>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={wanted} onChange={(event) => setWanted(event.target.checked)} />
-        {t("town.askForHelp", { defaultValue: "Help wanted" })}</label>
+      <span className="flex items-center gap-2"><ToggleButton checked={wanted} onChange={setWanted} label={t("town.askForHelp", { defaultValue: "Help wanted" })} />
+        {t("town.askForHelp", { defaultValue: "Help wanted" })}</span>
       <span className="ml-auto flex gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>{t("common.cancel", { defaultValue: "Cancel" })}</Button>
         <Button type="submit" size="sm" disabled={busy || !title.trim()}>{t("town.startProject", { defaultValue: "Start it" })}</Button>
@@ -110,20 +110,19 @@ function ProjectBoard({ project, statuses, projectStatuses, residents, change }:
 }) {
   const { t } = useTranslation();
   const [title, setTitle] = useState("");
-  return <section aria-label={project.title} className="mt-2">
-    <div className="settings-list-inset flex flex-wrap items-center gap-3 text-[13px]">
-      <h2 className="text-[15px] font-semibold">{project.title}</h2>
+  return <TownSection title={project.title} description={project.description || undefined}
+    badges={<span className="text-xs font-normal text-muted-foreground">{t("town.projectLead", { defaultValue: "lead {{who}}", who: project.lead })}</span>}
+    actions={<>
       <label className="flex items-center gap-2">{t("town.projectStatus", { defaultValue: "Status" })}
         <select className={SELECT} value={project.status} onChange={(event) => void change({ action: "update_project", project: project.slug, status: event.target.value })}>
           {projectStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </label>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={project.help_wanted}
-        onChange={(event) => void change({ action: "update_project", project: project.slug, help_wanted: event.target.checked })} />
-        {t("town.askForHelp", { defaultValue: "Help wanted" })}</label>
-    </div>
-    {project.description && <p className="settings-list-inset mt-1 whitespace-pre-wrap text-[13px] text-muted-foreground">{project.description}</p>}
-    <form className="settings-list-inset mt-2 flex gap-2" onSubmit={(event) => {
+      <span className="flex items-center gap-2 text-[13px]"><ToggleButton checked={project.help_wanted} label={t("town.askForHelp", { defaultValue: "Help wanted" })}
+        onChange={(help) => void change({ action: "update_project", project: project.slug, help_wanted: help })} />
+        {t("town.askForHelp", { defaultValue: "Help wanted" })}</span>
+    </>}>
+    <form className="settings-list-row flex gap-2 py-3" onSubmit={(event) => {
       event.preventDefault();
       void change({ action: "new_ticket", project: project.slug, title }).then((ok) => { if (ok) setTitle(""); });
     }}>
@@ -131,7 +130,7 @@ function ProjectBoard({ project, statuses, projectStatuses, residents, change }:
         value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} />
       <Button type="submit" size="sm" disabled={!title.trim()}><Plus className="mr-1 h-4 w-4" />{t("town.addTicket", { defaultValue: "Add" })}</Button>
     </form>
-    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-4">
       {statuses.map((status) => {
         const tickets = project.tickets.filter((x) => x.status === status);
         return <section key={status} aria-label={status} className={cn("rounded-lg border border-t-4 bg-muted/20 p-2", COLUMN_TONE[status])}>
@@ -145,7 +144,7 @@ function ProjectBoard({ project, statuses, projectStatuses, residents, change }:
         </section>;
       })}
     </div>
-  </section>;
+  </TownSection>;
 }
 
 function TicketCard({ ticket, statuses, residents, change }: { ticket: TownTicket; statuses: string[]; residents: string[]; change: Change }) {

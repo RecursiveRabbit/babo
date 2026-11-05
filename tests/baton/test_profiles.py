@@ -137,3 +137,15 @@ def test_a_resident_works_with_a_preset_from_settings(town: Town, make_config) -
     # Without a choice, the default preset (Settings › Models).
     other = opencode.new_session(town, cfg, "inspector", title="t")
     assert opencode.opencode_config(town, cfg, other, bundle=Path("/b.md"), config_path=Path("/c.json"), babo="babo")["model"] == "babo/local"
+
+
+def test_a_number_setting_has_a_range_for_its_slider(make_config) -> None:
+    from babo.baton import settings
+
+    shown = {s["key"]: s for s in settings.current(make_config("mayor").baton)}
+    assert shown["memory.idle_minutes"]["range"] == [1, 240, 1] and shown["bundle.search_hits"]["range"] == [0, 10, 1]
+    assert "range" not in shown["upkeep.quiet_hours"] and "range" not in shown["git_remote"]
+    for item in shown.values():
+        if "range" in item:
+            low, high, _ = item["range"]
+            assert low <= item["value"] <= high, item["key"]  # the defaults sit inside their ranges

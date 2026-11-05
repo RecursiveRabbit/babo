@@ -1187,7 +1187,7 @@ describe("Settings models", () => {
     expect(
       within(enabledCodexRow).getByRole("switch", { name: "Disable preset" }),
     ).toBeChecked();
-    expect(within(enabledCodexRow).getByRole("switch")).toHaveClass("h-5", "w-9", "bg-foreground");
+    expect(within(enabledCodexRow).getByRole("switch")).toHaveClass("h-5", "w-9", "bg-primary");
   });
 
   it("does not allow disabling the last preset", () => {

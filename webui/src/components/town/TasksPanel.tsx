@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Circle, CircleDot, MinusCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { useClient } from "@/providers/ClientProvider";
 import { fetchTownTasks, type TownTaskList } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { TownSection } from "@/components/town/TownLayout";
 
 const POLL_MS = 15_000;
 
@@ -24,9 +24,7 @@ export function TasksPanel() {
     return () => window.clearInterval(timer);
   }, [load]);
   if (!lists || lists.length === 0) return null;
-  return <section aria-label={t("town.workingOn", { defaultValue: "Working on" })}>
-    <h2 className="settings-list-inset mt-2 text-[13px] font-medium text-muted-foreground">{t("town.workingOn", { defaultValue: "Working on" })}</h2>
-    <SettingsGroup>
+  return <TownSection title={t("town.workingOn", { defaultValue: "Working on" })}>
       {lists.map((list) => <div key={`${list.resident}/${list.session}`} className="settings-list-row py-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3">
           <span className="text-[14px] font-medium">{list.resident}</span>
@@ -49,6 +47,5 @@ export function TasksPanel() {
           })}
         </ul>
       </div>)}
-    </SettingsGroup>
-  </section>;
+  </TownSection>;
 }

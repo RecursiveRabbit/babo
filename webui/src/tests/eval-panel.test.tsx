@@ -26,7 +26,7 @@ describe("model eval", () => {
     expect(await screen.findByText("27/31 passed")).toBeVisible();
     expect(screen.getByText(/baseline 25\/31 \(2026-10-30\)/)).toBeVisible();
     fireEvent.change(screen.getByRole("combobox", { name: "Preset to evaluate" }), { target: { value: "cloud" } });
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("switch", { name: "Keep as its baseline" }));
     fireEvent.click(screen.getByRole("button", { name: "Run the eval" }));
     await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.eval", { preset: "cloud", baseline: true }, expect.any(Number)));
     expect(await screen.findByRole("button", { name: "Evaluating cloud: 0/31" })).toBeDisabled();

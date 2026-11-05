@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
@@ -75,6 +76,15 @@ function Switches() {
       <ToggleButton checked disabled onChange={() => {}} label={t("controls.toggle.unavailableOn")} />
       <ToggleButton checked={false} disabled onChange={() => {}} label={t("controls.toggle.unavailableOff")} />
     </div>
+  </div>;
+}
+
+function Sliders() {
+  const { t } = useGalleryTranslation();
+  const [value, setValue] = useState(20);
+  return <div className="space-y-5">
+    <Slider value={value} min={1} max={240} onChange={setValue} ariaLabel={t("controls.slider.label")} unit="min" />
+    <Slider value={45} min={1} max={240} disabled onChange={() => {}} ariaLabel={t("controls.slider.label")} unit="min" />
   </div>;
 }
 
@@ -262,6 +272,9 @@ export const foundationExamples: ComponentExample[] = [
     description: "controls.textarea.description", options: "controls.textarea.options", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
   { title: "controls.toggle.title", files: ["toggle-button"], Preview: Switches,
     description: "controls.toggle.description", options: "controls.toggle.options", code: '<ToggleButton checked={enabled} onChange={setEnabled} label="Enable feature" />' },
+  { title: "controls.slider.title", files: ["slider"], Preview: Sliders,
+    description: "controls.slider.description", options: "controls.slider.options",
+    code: '<Slider value={minutes} min={1} max={240} onChange={setMinutes} ariaLabel="Quiet minutes" unit="min" />' },
   { title: "controls.select.title", files: ["select"], Preview: Selects,
     description: "controls.select.description", options: "controls.select.options",
     code: '<Select value={value} onValueChange={setValue}>\n  <SelectTrigger aria-label="Model"><SelectValue /></SelectTrigger>\n  <SelectContent><SelectItem value="default">Default</SelectItem></SelectContent>\n</Select>' },

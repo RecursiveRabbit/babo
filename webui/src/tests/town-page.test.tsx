@@ -103,6 +103,22 @@ describe("town page", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("20 → 30");
   });
 
+  it("sets a range with a slider, and marks what isn't saved yet", async () => {
+    const ranged = [{ ...settings[0], range: [1, 240, 1] }];
+    mocks.fetch.mockImplementation((url: string) => Promise.resolve(new Response(
+      JSON.stringify(url.endsWith("/api/town/settings") ? { settings: ranged } : town()), { status: 200, headers: { "content-type": "application/json" } })));
+    mocks.mutation.mockResolvedValue({ message: "Checkpoint after … quiet minutes: 20 → 45", settings: [{ ...ranged[0], value: 45 }] });
+    render(<TownPage onBackToChat={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const slider = await screen.findByRole("slider", { name: "Checkpoint after … quiet minutes" });
+    const section = screen.getByRole("region", { name: "The town's settings" });
+    expect(section).toHaveTextContent("Everything is saved.");
+    fireEvent.change(slider, { target: { value: "45" } });
+    expect(section).toHaveTextContent("1 unsaved change(s).");
+    fireEvent.click(within(section).getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(mocks.mutation).toHaveBeenCalledWith("town.settings", { changes: { "memory.idle_minutes": "45" } }, 20_000));
+  });
+
   it("marks the Mayor as the main agent and changes a resident's profile, like `babo profile`", async () => {
     mocks.mutation.mockResolvedValue({
       message: "Profile of archivist: Run commands: deny → ask. It applies from the agent's next session.",

@@ -31,7 +31,7 @@ export function ToggleButton({
         "after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']",
         "transition-colors duration-200 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         checked
-          ? "bg-foreground"
+          ? "bg-primary"
           : "bg-muted-foreground/25 hover:bg-muted-foreground/30",
         disabled && "cursor-default opacity-60",
         disabled && !checked && "hover:bg-muted-foreground/25",

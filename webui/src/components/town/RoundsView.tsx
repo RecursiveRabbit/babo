@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { useClient } from "@/providers/ClientProvider";
 import { SessionAccessFields } from "@/components/town/AccessFields";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { OwnTimePanel } from "@/components/town/OwnTimePanel";
+import { TownIntro, TownSection } from "@/components/town/TownLayout";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import {
   approveTownRehearsal, fetchTownRounds, rehearseTownRound, runTownRound, setTownRound, setTownRoundAccess,
   type TownRehearsal, type TownRound, type TownRoundStep, type TownRounds,
@@ -39,9 +40,9 @@ export function RoundsView({ onNotice, onError }: { onNotice: (message: string) 
     finally { setBusy(""); }
   };
   return <>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
+    <TownIntro>
       {t("town.roundsIntro", { defaultValue: "The town's work is done in rounds: when each one runs, and its steps in order, each an office's duty. A step for an office nobody holds waits until someone moves in. Same as `babo rounds`." })}
-    </p>
+    </TownIntro>
     {Object.entries(data.broken).map(([name, why]) => <p key={name} role="alert" className="settings-list-inset text-[13px] text-destructive">
       {t("town.roundBroken", { defaultValue: "rounds/{{name}}.md can't be read: {{why}}", name, why })}
     </p>)}
@@ -52,14 +53,11 @@ export function RoundsView({ onNotice, onError }: { onNotice: (message: string) 
       onApprove={(id) => void act(round.name, () => approveTownRehearsal(client, round.name, id))}
       onAccess={(step, access, commands) => void act(round.name, () => setTownRoundAccess(client, round.name, step, access, commands))} />)}
     <OwnTimePanel onNotice={onNotice} onError={onError} />
-    <section aria-label={t("town.baboOwn", { defaultValue: "Part of Babo" })} className="mt-4">
-      <h2 className="settings-list-inset text-[13px] font-medium text-foreground">{t("town.baboOwn", { defaultValue: "Part of Babo" })}</h2>
-      <p className="settings-list-inset text-xs text-muted-foreground">{t("town.baboOwnIntro", { defaultValue: "What Babo does itself, for every resident, whatever the rounds: upkeep." })}</p>
-      <SettingsGroup>
-        {data.babo.map((b) => <div key={b.title} className="settings-list-row py-2 text-[13px]"><span className="font-medium">{b.title}</span>
-          <span className="text-muted-foreground"> · {b.what}</span></div>)}
-      </SettingsGroup>
-    </section>
+    <TownSection title={t("town.baboOwn", { defaultValue: "Part of Babo" })}
+      description={t("town.baboOwnIntro", { defaultValue: "What Babo does itself, for every resident, whatever the rounds: upkeep." })}>
+      {data.babo.map((b) => <div key={b.title} className="settings-list-row py-2 text-[13px]"><span className="font-medium">{b.title}</span>
+        <span className="text-muted-foreground"> · {b.what}</span></div>)}
+    </TownSection>
   </>;
 }
 
@@ -70,13 +68,10 @@ function RoundCard({ round, busy, onRun, onSet, onRehearse, onApprove, onAccess 
 }) {
   const { t } = useTranslation();
   const [last] = round.recent;
-  return <section aria-label={round.title} className="mt-3">
-    <h2 className="settings-list-inset flex flex-wrap items-center gap-2 text-[14px] font-medium text-foreground">
-      {round.title}<span className="text-xs font-normal text-muted-foreground">{round.name}</span>
-      {!round.enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">{t("town.roundOff", { defaultValue: "off" })}</span>}
-    </h2>
-    {round.about && <p className="settings-list-inset text-xs text-muted-foreground">{round.about}</p>}
-    <SettingsGroup>
+  return <TownSection title={round.title} description={round.about || undefined} badges={<>
+    <span className="text-xs font-normal text-muted-foreground">{round.name}</span>
+    {!round.enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">{t("town.roundOff", { defaultValue: "off" })}</span>}
+  </>}>
       <div className="settings-list-row flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-[13px]">
         <span className="min-w-[14rem] flex-1">
           <span className="block">{t("town.roundWhen", { defaultValue: "Runs {{when}}", when: round.when })}</span>
@@ -93,12 +88,12 @@ function RoundCard({ round, busy, onRun, onSet, onRehearse, onApprove, onAccess 
             <option value="now">{t("town.roundNow", { defaultValue: "runs right away" })}</option>
           </select>
         </label>
-        <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" role="switch" aria-label={t("town.roundOn", { defaultValue: "On" })} checked={round.enabled} disabled={busy}
-            onChange={(event) => onSet({ enabled: event.target.checked })} />
+        <span className="flex items-center gap-2 text-xs">
+          <ToggleButton label={t("town.roundOn", { defaultValue: "On" })} checked={round.enabled} disabled={busy}
+            onChange={(enabled) => onSet({ enabled })} />
           {t("town.roundOn", { defaultValue: "On" })}
-        </label>
-        <Button size="sm" variant="secondary" disabled={busy || !round.enabled} onClick={onRun} className="gap-1.5">
+        </span>
+        <Button size="sm" variant="outline" disabled={busy || !round.enabled} onClick={onRun} className="gap-1.5">
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}{t("town.runRound", { defaultValue: "Run now" })}
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onRehearse(false)}>{t("town.rehearse", { defaultValue: "Rehearse" })}</Button>
@@ -135,8 +130,7 @@ function RoundCard({ round, busy, onRun, onSet, onRehearse, onApprove, onAccess 
         </div>;
       })}
       {round.rehearsal && <RehearsalReport rehearsal={round.rehearsal} busy={busy} onApprove={() => onApprove(round.rehearsal!.id)} />}
-    </SettingsGroup>
-  </section>;
+  </TownSection>;
 }
 
 /** What one step may do: its access beyond (or short of) the office's profile, and exact commands. Approving the round
@@ -159,7 +153,7 @@ function StepAccess({ step, busy, onAccess }: { step: TownRoundStep; busy: boole
       <textarea className="mt-1 block w-full rounded border bg-background px-2 py-1 font-mono text-xs text-foreground" rows={2}
         value={commands} disabled={busy} onChange={(event) => setCommands(event.target.value)} />
     </label>
-    <Button size="sm" variant="ghost" className="mt-1" disabled={busy || commands === saved}
+    <Button size="sm" variant="outline" className="mt-1" disabled={busy || commands === saved}
       onClick={() => onAccess({}, commands.split("\n").map((c) => c.trim()).filter(Boolean))}>{t("town.saveCommands", { defaultValue: "Save the commands" })}</Button>
   </details>;
 }

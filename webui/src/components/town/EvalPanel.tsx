@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Gauge, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { ToggleButton } from "@/components/ui/toggle-button";
+import { TownSection } from "@/components/town/TownLayout";
 import { useClient } from "@/providers/ClientProvider";
 import { fetchTownEval, runTownEval, type TownEvalStatus } from "@/lib/api";
 
@@ -36,20 +37,18 @@ export function EvalPanel() {
     try { const next = await runTownEval(client, chosen, baseline); setStatus(next); setMessage(next.message); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  return <section aria-label={t("town.evalTitle", { defaultValue: "Model eval" })} className="mt-4">
-    <h2 className="settings-list-inset text-[13px] font-medium text-foreground">{t("town.evalTitle", { defaultValue: "Model eval" })}</h2>
-    <p className="settings-list-inset text-[13px] leading-6 text-muted-foreground">
-      {t("town.evalIntro", { defaultValue: "{{count}} representative tasks (choosing tools, leaving them alone, following through, acting on the baton, writing memory), each checked by Babo, on a preset of your choice. Keep a run as the preset's baseline to compare later runs with. Same as `babo eval`.", count: status.tasks })}
-    </p>
-    <div className="settings-list-inset flex flex-wrap items-center gap-3">
+  return <TownSection title={t("town.evalTitle", { defaultValue: "Model eval" })} description={
+      t("town.evalIntro", { defaultValue: "{{count}} representative tasks (choosing tools, leaving them alone, following through, acting on the baton, writing memory), each checked by Babo, on a preset of your choice. Keep a run as the preset's baseline to compare later runs with. Same as `babo eval`.", count: status.tasks })}>
+    <div className="settings-list-row flex flex-wrap items-center gap-3 py-3">
       <select aria-label={t("town.evalPreset", { defaultValue: "Preset to evaluate" })} className="rounded border bg-background px-2 py-1.5 text-[13px]"
         value={chosen} onChange={(event) => setPreset(event.target.value)} disabled={!!status.running}>
         {status.presets.map((name) => <option key={name} value={name}>{name}</option>)}
       </select>
-      <label className="flex items-center gap-2 text-[13px]">
-        <input type="checkbox" checked={baseline} onChange={(event) => setBaseline(event.target.checked)} disabled={!!status.running} />
+      <span className="flex items-center gap-2 text-[13px]">
+        <ToggleButton checked={baseline} onChange={setBaseline} disabled={!!status.running}
+          label={t("town.evalBaseline", { defaultValue: "Keep as its baseline" })} />
         {t("town.evalBaseline", { defaultValue: "Keep as its baseline" })}
-      </label>
+      </span>
       <Button onClick={() => void start()} disabled={!!status.running || !chosen} className="gap-2">
         {status.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
         {status.running
@@ -57,9 +56,9 @@ export function EvalPanel() {
           : t("town.runEval", { defaultValue: "Run the eval" })}
       </Button>
     </div>
-    {message && !status.running && <p role="status" className="settings-list-inset text-[13px] text-muted-foreground">{message}</p>}
-    {error && <p role="alert" className="settings-list-inset text-[13px] text-destructive">{error}</p>}
-    {status.latest.length > 0 && <SettingsGroup>
+    {message && !status.running && <p role="status" className="settings-list-row py-2 text-[13px] text-muted-foreground">{message}</p>}
+    {error && <p role="alert" className="settings-list-row py-2 text-[13px] text-destructive">{error}</p>}
+    {status.latest.length > 0 && <>
       {status.latest.map((row) => <div key={row.preset} className="settings-list-row flex flex-wrap items-center gap-x-3 py-3 text-[13px]">
         <span className="min-w-[10rem] flex-1 font-medium">{row.preset}{row.model ? <span className="font-normal text-muted-foreground"> · {row.model}</span> : null}</span>
         <span>{t("town.evalScore", { defaultValue: "{{passed}}/{{total}} passed", passed: row.passed, total: row.total })}</span>
@@ -70,6 +69,6 @@ export function EvalPanel() {
           {" · "}{row.at.slice(0, 16).replace("T", " ")}
         </span>
       </div>)}
-    </SettingsGroup>}
-  </section>;
+    </>}
+  </TownSection>;
 }

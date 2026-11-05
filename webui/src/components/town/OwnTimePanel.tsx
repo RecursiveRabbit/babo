@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { TownSection } from "@/components/town/TownLayout";
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ActivityLine, refreshActivity } from "@/components/town/ActivityLine";
 import { useClient } from "@/providers/ClientProvider";
@@ -36,12 +36,7 @@ export function OwnTimePanel({ onNotice, onError }: { onNotice: (message: string
     daily: t("town.ownTimeDaily", { defaultValue: "Daily" }), weekly: t("town.ownTimeWeekly", { defaultValue: "Weekly" }),
     off: t("town.ownTimeOff", { defaultValue: "Off" }), town: t("town.ownTimeTown", { defaultValue: "As the town" }),
   })[every] ?? every;
-  return <section aria-label={t("town.ownTime", { defaultValue: "Own time" })} className="mt-4">
-    <h2 className="settings-list-inset text-[13px] font-medium text-foreground">{t("town.ownTime", { defaultValue: "Own time" })}</h2>
-    <p className="settings-list-inset text-xs text-muted-foreground">
-      {t("town.ownTimeIntro", { defaultValue: "A slot for each resident that is its own: nothing is asked of it. It might look back on its work, revise itself, write a lesson or a letter, move a project of its own on, or rest. It runs when the model is free; Babo keeps only the few lines it says about it." })}
-    </p>
-    <SettingsGroup>
+  return <TownSection title={t("town.ownTime", { defaultValue: "Own time" })} description={t("town.ownTimeIntro", { defaultValue: "A slot for each resident that is its own: nothing is asked of it. It might look back on its work, revise itself, write a lesson or a letter, move a project of its own on, or rest. It runs when the model is free; Babo keeps only the few lines it says about it." })}>
       <div className="settings-list-row flex flex-wrap items-center gap-3 py-3 text-[13px]">
         <span className="font-medium">{t("town.ownTimeForTown", { defaultValue: "For the town" })}</span>
         <SegmentedControl<string> value={data.every} ariaLabel={t("town.ownTimeForTown", { defaultValue: "For the town" })}
@@ -75,6 +70,5 @@ export function OwnTimePanel({ onNotice, onError }: { onNotice: (message: string
           </p>}
         </div>;
       })}
-    </SettingsGroup>
-  </section>;
+  </TownSection>;
 }

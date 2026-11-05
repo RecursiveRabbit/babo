@@ -1792,6 +1792,8 @@ export interface TownSetting {
   kind: "int" | "hours" | "text";
   applies: string;
   value: number | string;
+  /** An int's sensible [lowest, highest, step], shown as a slider (older Babo: absent, a text box). */
+  range?: [number, number, number];
 }
 
 export function fetchTownSettings(token: string, base: string = ""): Promise<{ settings: TownSetting[] }> {

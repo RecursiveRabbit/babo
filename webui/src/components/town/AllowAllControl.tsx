@@ -57,7 +57,7 @@ export function AllowAllControl({ sessionKey }: { sessionKey: string }) {
           {t("allowAll.turnOff", { defaultValue: "Turn off" })}
         </button>
       </span>
-      : <Button variant="ghost" size="sm" className="pointer-events-auto gap-1 text-xs text-muted-foreground" onClick={() => setAsking(true)}>
+      : <Button variant="outline" size="sm" className="pointer-events-auto gap-1 text-xs text-muted-foreground" onClick={() => setAsking(true)}>
         <ShieldAlert className="h-3.5 w-3.5" aria-hidden />{t("allowAll.button", { defaultValue: "Allow all" })}
       </Button>}
     <AlertDialog open={asking} onOpenChange={(open) => { if (!open) setAsking(false); }}>
