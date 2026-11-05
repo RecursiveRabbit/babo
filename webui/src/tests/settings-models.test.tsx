@@ -585,6 +585,31 @@ describe("Settings models", () => {
     });
   });
 
+  it("saves whether a preset sends the model's thinking back", async () => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload,
+      model_presets: payload.model_presets.map((preset) => ({ ...preset, send_thinking_back: "on" as const })),
+    });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+
+    const control = screen.getByRole("radiogroup", { name: "Send thinking back" });
+    expect(within(control).getByRole("radio", { name: "Automatic" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(control).getByRole("radio", { name: "Always" }));
+    fireEvent.click(presetSaveButton());
+
+    await waitFor(() => {
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.update",
+        { name: "primary", send_thinking_back: "on" },
+        20_000,
+      );
+    });
+  });
+
   it("renames an existing preset without losing the editor selection", async () => {
     const payload = settingsPayload();
     const renamedPayload: SettingsPayload = {

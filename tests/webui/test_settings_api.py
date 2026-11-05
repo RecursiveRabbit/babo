@@ -2925,3 +2925,26 @@ def test_legacy_openai_settings_can_return_to_auto(monkeypatch, tmp_path, field)
     monkeypatch.setattr("babo.config.loader._current_config_path", config_path)
     update_provider_settings({"provider": ["openai"], field: ["auto"]})
     assert load_config(config_path).providers.openai.api is None
+
+
+def test_model_configuration_says_whether_thinking_goes_back(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("babo.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {"name": ["kimi"], "provider": ["openai"], "model": ["kimi-k2.6"], "send_thinking_back": ["on"]}
+    )
+    rows = {row["name"]: row for row in payload["model_presets"]}
+    assert rows["kimi"]["send_thinking_back"] == "on"
+
+    update_model_configuration({"name": ["kimi"], "sendThinkingBack": ["off"]})
+    assert load_config(config_path).model_presets["kimi"].send_thinking_back == "off"
+
+    with pytest.raises(WebUISettingsError):
+        update_model_configuration({"name": ["kimi"], "send_thinking_back": ["sometimes"]})

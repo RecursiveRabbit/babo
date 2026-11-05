@@ -156,6 +156,7 @@ def _make_provider_core(
         )
 
     provider.generation = preset.to_generation_settings()
+    provider.send_thinking_back = preset.send_thinking_back
     return provider
 
 

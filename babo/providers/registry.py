@@ -146,6 +146,9 @@ class ProviderSpec:
     # any extra fields; other providers (DeepSeek) require this key on the
     # wire to keep thinking-mode history intact.
     strip_history_reasoning_content: bool = False
+    # The provider's thinking models expect the thinking of earlier turns sent back (``reasoning_content`` on every
+    # assistant message, empty when a turn had none): what a preset's "send thinking back: auto" means for it.
+    replays_reasoning: bool = False
 
     @property
     def label(self) -> str:
@@ -730,6 +733,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Moonshot",
         backend="openai_compat",
         default_api_base="https://api.moonshot.ai/v1",
+        replays_reasoning=True,
         model_overrides=(
             ("kimi-k2.7", {"temperature": 1.0}),
             ("kimi-k2.7-code", {"temperature": 1.0}),

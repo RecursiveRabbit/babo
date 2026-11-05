@@ -1196,7 +1196,7 @@ def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messa
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] == "<think>我再查一下</think>"
+    assert sanitized[1]["content"] == "对，破 4 万指日可待\n\n<think>我再查一下</think>"  # (both turns, nothing dropped)
     assert sanitized[1]["tool_calls"][0]["id"] == "call_function_akxp3wqzn7ph_1"
     assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
 
@@ -1224,7 +1224,7 @@ def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages()
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] == "<think>我再查一下</think>"
+    assert sanitized[1]["content"] == "对，破 4 万指日可待\n\n<think>我再查一下</think>"  # (both turns, nothing dropped)
     assert sanitized[1]["tool_calls"][0]["id"] == "3ec83c30d"
     assert sanitized[2]["tool_call_id"] == "3ec83c30d"
 
@@ -1872,7 +1872,7 @@ def test_kimi_k3_uses_native_defaults(kimi_k3_model: str) -> None:
 
     assert "temperature" not in kw
     assert "max_tokens" not in kw
-    assert kw["max_completion_tokens"] == 1024
+    assert kw["max_completion_tokens"] == 16000  # Moonshot's thinking guide: at least 16000, or thinking + answer is cut off
     assert "reasoning_effort" not in kw
     assert "extra_body" not in kw
 

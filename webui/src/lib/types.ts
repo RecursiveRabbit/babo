@@ -716,6 +716,8 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
+    /** Whether the model's thinking goes back with the history: auto (on for Moonshot/Kimi), on or off. */
+    send_thinking_back?: SendThinkingBack;
     api?: ModelAPIConfig | null;
     extra_headers?: Record<string, string> | null;
     extra_query?: Record<string, string> | null;
@@ -1348,6 +1350,8 @@ export interface ChannelConfigurePayload {
   babo_features?: BaboFeaturesPayload;
 }
 
+export type SendThinkingBack = "auto" | "on" | "off";
+
 export interface ModelConfigurationCreate {
   name: string;
   provider: string;
@@ -1356,6 +1360,7 @@ export interface ModelConfigurationCreate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  sendThinkingBack?: SendThinkingBack;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
   extraQuery?: string;
@@ -1371,6 +1376,7 @@ export interface ModelConfigurationUpdate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  sendThinkingBack?: SendThinkingBack;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
   extraQuery?: string;

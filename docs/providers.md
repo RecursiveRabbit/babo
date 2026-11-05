@@ -372,6 +372,18 @@ Known Flash and Pro models offer `none`, `low`, `high`, and `max` reasoning sett
 
 For web search, configure babo's [web search tool](./guides/configure-web-search.md). Selecting a DeepSeek model does not enable DeepSeek-hosted search.
 
+### Moonshot (Kimi)
+
+Select **Moonshot** in **Settings → Models**. Kimi's thinking models (`kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `kimi-k3.1-pro`) think before they answer, and Moonshot asks for that thinking to come back with the conversation: every earlier assistant turn keeps its `reasoning_content`, and within a run of tool calls all of it is kept. Babo does this for you.
+
+- **Send thinking back** (each preset, beside Reasoning effort): *Automatic* sends it back where the provider needs it (Moonshot) and leaves it out elsewhere; *Always* sends it back on any provider and, on `kimi-k2.6`, also asks Moonshot to keep the thinking from earlier turns (`thinking.keep: "all"`; `kimi-k2.7-code` and `kimi-k3` always keep it); *Never* leaves it out. In JSON, a preset's `sendThinkingBack` is `auto`, `on` or `off`.
+- **Thinking on or off**: on `kimi-k2.6`, a reasoning effort of `none` turns thinking off; anything else leaves it on. `kimi-k2.7-code` always thinks. `kimi-k3` takes `low`, `high` or `max`.
+- **Output budget**: thinking and the answer share it, so Babo gives a thinking Kimi model at least 16,000 tokens, as Moonshot recommends.
+- **Turns in order**: Moonshot refuses two assistant turns in a row. When a conversation has them (an image reply, an interrupted turn), Babo joins them into one, keeping the text, the thinking and the tool calls, before it calls the model.
+- **Images** go as `image_url` parts, in user messages and in tool results.
+
+Sources: Moonshot's [thinking model guide](https://platform.moonshot.ai/docs/guide/use-kimi-k2-thinking-model), [vision guide](https://platform.moonshot.ai/docs/guide/use-kimi-vision-model) and [partial mode](https://platform.moonshot.ai/docs/guide/use-partial-mode-feature-of-kimi-api) (why a trailing assistant turn means something else to it), and Moonshot's own client, [kimi-cli](https://github.com/MoonshotAI/kimi-cli).
+
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.
