@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 export const SESSION_CHANGES = [
   { key: "files", label: "Change files" },
   { key: "shell", label: "Run commands" },
-  { key: "subagents", label: "Start crew" },
+  { key: "errands", label: "Send residents on errands" },
   { key: "web_fetch", label: "Read web pages" },
   { key: "web_search", label: "Search the web" },
 ] as const;

@@ -58,7 +58,7 @@ def test_what_a_session_may_do_changes_now_in_the_terminal_too(town: Town, make_
     everything = runner.invoke(cli.session_app, ["set", "archivist", session.id, "--all"], env={"COLUMNS": "300"})
     assert everything.exit_code == 0, everything.output
     overrides = opencode.get_session(town, "archivist", session.id).overrides
-    assert overrides == {**{c: "allow" for c in ("files", "shell", "subagents", "web_fetch", "web_search", "image_generation")}, "read": "town"}
+    assert overrides == {**{c: "allow" for c in ("files", "shell", "errands", "web_fetch", "web_search", "image_generation")}, "read": "town"}
     assert runner.invoke(cli.session_app, ["set", "archivist", session.id, "--reset"]).exit_code == 0
     assert opencode.get_session(town, "archivist", session.id).overrides == {}
     bad = runner.invoke(cli.session_app, ["set", "archivist", session.id, "read=everything"])

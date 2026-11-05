@@ -36,11 +36,11 @@ class _McpTool(Tool):
 
 def test_without_profile_files_each_office_keeps_its_tools(make_loop) -> None:
     mayor = set(make_loop("mayor").tools.tool_names)
-    assert {"read_file", "write_file", "exec", "subagent", "visit"} <= mayor
+    assert {"read_file", "write_file", "exec", "visit", "send_errand"} <= mayor and "subagent" not in mayor
     assert "web_search" not in mayor
     archivist = set(make_loop("archivist").tools.tool_names)
     assert "read_file" in archivist and "commons_write" in archivist
-    assert not {"write_file", "exec", "subagent"} & archivist
+    assert not {"write_file", "exec", "subagent", "send_errand"} & archivist
 
 
 def test_a_profile_decides_the_tools_and_memory_timing(town: Town, make_loop) -> None:

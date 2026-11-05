@@ -1555,7 +1555,6 @@ export interface TownOverview {
   name: string;
   root: string;
   residents: TownResident[];
-  board: { kind: string; author: string; created: string; text: string }[];
   pending: { tools: number; proposals: number; founding: number; flags: number; sessions: number; leaving?: number };
   last_upkeep: { pass: string; finished: boolean; steps: string[]; log: string } | null;
   upkeep: TownUpkeep;

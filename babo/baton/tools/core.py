@@ -133,7 +133,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                 "thread": _str("read, reply, close: the thread (as the square lists it)."),
                 "office": _str("The Mayor's move_in_request: a short office name, e.g. gardener."),
                 "profile": {"type": "object", "description": "The Mayor's move_in_request: access beyond a new resident's, e.g. "
-                            "{shell: ask, read: town} (files, shell, subagents, web_fetch, web_search, image_generation: allow|ask|deny)."},
+                            "{shell: ask, read: town} (files, shell, web_fetch, web_search, image_generation: allow|ask|deny)."},
                 "joins": {"type": "array", "items": {"type": "object"}, "description": "The Mayor's move_in_request: rounds it joins, "
                           "each {round, duty, material?: previous}; a new round also needs when, e.g. {daily: '07:00'}."}},
              "required": []},
@@ -210,9 +210,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                     "reason": _str("Why it's needed. The owner reads this before deciding."),
                     "access": {
                         "type": "object",
-                        "description": "Access beyond the resident's profile, each allow or deny: files, shell, subagents, web_fetch, web_search, image_generation.",
+                        "description": "Access beyond the resident's profile, each allow or deny: files, shell, web_fetch, web_search, image_generation.",
                         "properties": {k: {"type": "string", "enum": ["allow", "deny"]}
-                                       for k in ("files", "shell", "subagents", "web_fetch", "web_search", "image_generation")},
+                                       for k in ("files", "shell", "web_fetch", "web_search", "image_generation")},
                     },
                     "commands": _list("Exact shell commands the session may run, each written exactly as it will be run."),
                     "visibility": {"type": "string", "enum": ["private", "public"],
@@ -220,7 +220,6 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                 },
                 "required": ["resident", "task", "reason"],
             },
-            offices=("mayor",),
         ),
         ToolSpec(
             "commons_write",
@@ -619,6 +618,12 @@ class Toolbox:
 
     def send_errand(self, resident: str, task: str, reason: str, access: dict[str, object] | None = None,
                     commands: list[str] | None = None, visibility: str = "private") -> str:
+        from babo.baton import profiles
+        from babo.baton.config import BatonConfig
+
+        if profiles.load(self.town, BatonConfig(), self.resident_id, self.me.office).level("errands") != "allow":
+            raise BatonError(f"Blocked: your profile doesn't let you send residents on errands. To get it done, send_letter to "
+                             f"the Mayor and say what you need, or ask {self.town.owner_name} for the permission.")
         from babo.agent.tools.context import current_request_session_key
         from babo.baton import requests
 

@@ -3,6 +3,7 @@ import { BookOpen, ExternalLink, Github, MessageCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { useThemeValue } from "@/hooks/useTheme";
 
 export function AboutSettingsLayout({ versionCheck, links, starLink }: {
   versionCheck: ReactNode;
@@ -12,7 +13,8 @@ export function AboutSettingsLayout({ versionCheck, links, starLink }: {
   return <div className="flex flex-1 flex-col gap-5">
     <div className="flex flex-col items-center gap-3 py-6 text-center">
       <img src="/brand/babo_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
-      <h1><img src="/brand/babo_wordmark.svg" alt="babo" width={492} height={184} className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
+      <h1><img src={useThemeValue() === "dark" ? "/brand/babo_wordmark_dark.svg" : "/brand/babo_wordmark.svg"} alt="babo"
+        width={492} height={184} className="h-auto w-40 select-none" draggable={false} /></h1>
     </div>
     {versionCheck}
     {links}

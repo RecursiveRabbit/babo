@@ -391,8 +391,6 @@ def town(
         table.add_row(label, r["office"], (r["last_active"] or "never")[:16].replace("T", " "),
                       f"{r['unread']}" + (f" ({r['flags']} flag)" if r["flags"] else ""), r["status"])
     console.print(table)
-    posts = [f"- [{b['kind']}] {b['text'][:90]} ({b['author']})" for b in view["board"]]
-    console.print("\nBoard:\n" + ("\n".join(posts) if posts else "- (nothing open)"))
     waiting = {k: v for k, v in view["pending"].items() if v}
     if waiting:
         console.print("\nWaiting for your review: " + ", ".join(f"{v} {k}" for k, v in waiting.items()) + " (babo review)")

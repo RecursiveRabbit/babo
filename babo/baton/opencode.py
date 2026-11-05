@@ -438,10 +438,12 @@ def _permissions(town: Town, resident: str, profile: profiles.Profile, *, unatte
         rule("edit", f"residents/{resident}/*", level("files")),
         rule("shell", "*", level("shell")),
         rule("webfetch", "*", level("web_fetch")),
-        rule("subagent", "*", level("subagents")),
+        rule("subagent", "*", "deny"),  # no temporary helpers: work goes to residents, by errand
         rule(f"{_tool_prefix(PROVIDER)}*", "*", "allow"),
     ]
     rules += [rule(f"{_tool_prefix(name)}*", "*", "allow") for name in mcp or []]
+    if level("errands") != "allow":  # sending another resident on an errand is a permission of its own
+        rules.append(rule(f"{_tool_prefix(PROVIDER)}send_errand", "*", "deny"))
     if commands and level("shell") != "allow":
         rules += [rule("shell", piece, "allow") for command in commands for piece in _command_pieces(command)]
     return rules

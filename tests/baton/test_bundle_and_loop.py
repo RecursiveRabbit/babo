@@ -89,7 +89,7 @@ def test_resident_loop_uses_baton_context_and_pruned_tools(make_loop, town: Town
     names = set(loop.tools.tool_names)
     assert {"search_memory", "read_note", "remember", "revise_self", "send_letter", "town_square"} <= names
     assert "commons_write" not in names and "web_search" not in names and "cron" not in names
-    assert "subagent" in names  # the Mayor spawns crew
+    assert "subagent" not in names  # no temporary helpers: work goes to residents, by errand
     assert "send_errand" in names  # how the Mayor gets things done on the box
     assert "update_tasks" in names  # the town's longest work keeps a task list (step 19)
     assert "correct_checkpoint" in names  # the only way to correct the record (or resolve a stray line in it)

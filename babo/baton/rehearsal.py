@@ -46,8 +46,7 @@ LIVE_WAIT_S = 2 * 3600  # how long a live rehearsal waits for the owner's answer
 TURN_TIMEOUT_S = 1800
 # A resident's memory is its own: what it remembers of rehearsing stays; its work is put back.
 _MEMORY = ("checkpoints", "sessions", "inbox", "memory", "BATON.md", SELF_NAME, "knowledge")
-_ACTIONS = {"shell": "shell", "bash": "shell", "webfetch": "web_fetch", "websearch": "web_search", "subagent": "subagents",
-            "task": "subagents"}
+_ACTIONS = {"shell": "shell", "bash": "shell", "webfetch": "web_fetch", "websearch": "web_search"}
 
 
 @dataclass
@@ -92,7 +91,7 @@ class Rehearsal:
                 kind = _ACTIONS.get(asked.action, asked.action)
                 if kind == "shell":
                     commands += [c for c in asked.resources if c and c != "*" and c not in commands]
-                elif kind in ("web_fetch", "web_search", "subagents"):
+                elif kind in ("web_fetch", "web_search"):
                     access[kind] = "allow"
                 elif kind == "read":
                     access["read"] = "town"

@@ -27,7 +27,7 @@ def test_obsolete_settings_old_paths_and_the_rename_link_go(tmp_path: Path) -> N
     said = tidy(babo_home=babo, user_home=home, checkout=None)
     data = json.loads((babo / "config.json").read_text())
     assert data["baton"]["generatedDir"] == f"{home}/.babo/baton"
-    assert data["baton"]["night"] == {"toolTestTimeoutS": 60} and data["baton"]["toolsets"]["mayor"] == ["read_file", "subagent"]
+    assert data["baton"]["night"] == {"toolTestTimeoutS": 60} and data["baton"]["toolsets"]["mayor"] == ["read_file"]
     assert data["channels"]["telegram"]["token"] == "${TG}"
     assert json.loads((babo / "baton" / "mayor" / "config.json").read_text())["agents"]["defaults"]["workspace"] == "~/.babo/w"
     assert not (home / ".nanobot").exists() and (babo / "config.json").exists()

@@ -13,7 +13,6 @@ const town = {
     { id: "mayor", name: "", office: "mayor", status: "active", founded: "", last_active: "", unread: 0, flags: 0 },
     { id: "archivist", name: "", office: "archivist", status: "active", founded: "", last_active: "", unread: 0, flags: 0 },
   ],
-  board: [],
   pending: { tools: 0, proposals: 0, founding: 1, flags: 0, sessions: 0 },
   last_upkeep: null,
   upkeep: { service: "running", running: false, waiting: [], waiting_for: "", catch_up_requested: false, last_pass: "", quiet_hours: "", wait_minutes: 10 },

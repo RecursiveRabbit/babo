@@ -97,10 +97,35 @@ Each step is its own pull request, merged once its tests pass. Steps are numbere
 | # | Step |
 |---|---|
 | 29b | **A visual overhaul, for consistency and clear visual communication**: sleek, intuitive and functional; colours and light or dark mode configurable; everything understood at first glance: an action is always a button (never text that happens to be a link), switches for toggles, sliders for ranges, one design language throughout; pages organised logically; everything configurable and visible in the web interface, with exceptions agreed. Beyond the Town section (part one is done): the rest of the interface, settings, chat; and in the Town section still: areas grouped and labelled, text inside clear elements, things that matter stand out; changes animate in rather than just appearing; what an action started (a rehearsal, a run) shows its status right where it was clicked (I3) |
+| 29c | **Providers that need things done their way**: research, then build what each provider needs so Babo works just as well on it, Moonshot (Kimi) first. Known so far: whether the model's thinking is sent back with the conversation (a per-provider setting, where some require it and others reject it), and that an image in a reply mustn't become a second assistant turn in a row (Moonshot rejects any call with two assistant turns together, so Babo keeps turns in order). Set per provider in Settings › Models, with sensible defaults when the provider is known, and checked by `babo eval` and the doctor on that provider |
+| 29d | **Dream, excised**: the upstream memory consolidation (off in Babo since the start; residents author their own memory) removed entirely: its settings, commands, job, prompts, snapshots and tests. Nothing mentions a feature Babo doesn't have |
+| 29e | **No temporary helpers, in the engine either**: Babo no longer gives anyone *Start crew* (the permission is now *Send residents on errands*: work goes to a resident, in its own session, once the owner approves); the upstream subagent machinery behind it (the chat's task dock, the `subagent` tool, crew transcripts) goes too |
+| 31 | **Mail for the owner**: an inbox like a resident's, in the web interface (and `babo mail`): letters from residents to the owner, and the owner's to them, as threads; what's unread shows under *Needs you*. It takes the place of the notice board (removed: what needs a decision goes to Review, public notices to the square) |
+| 32 | **A round builder**: build and edit a round on the Rounds tab instead of writing its file: when it runs (schedule, an event, after another round), its steps in order (office, duty, material, access, on failure), each step's access with what it means, a preview of the file it writes, and *Rehearse* before saving; proposals from the Mayor open in it too |
+| 33 | **The baton as a working self**: a resident's baton grows from its latest checkpoint into its whole working self, in layers by how often they change (see *The baton, as a working self* below), written by the resident in its own words, read whole at the start of each session |
 | 24b | **The Mayor moves away, by handing over**: a newcomer moves into the Mayor's office first, and the outgoing Mayor primes them (open projects and tickets, errands in flight, what each resident is doing, promises made, the owner's preferences, what waits on the owner) in a handover note read at the start of the new Mayor's first sessions, and in conversation; Babo checks the note covers all of that before the old Mayor leaves |
 | 28 | **Remove the old names**: the temporary aliases from step 15 go, once the owner has confirmed everything works under the new ones |
 | 30 | **Named instances**: several towns, or a test town beside a real one (F2) |
 | — | Later: a world to visit (a MUD, reached as a plugin); containers per resident; *Open* landing right in the session's own page; tags for the Mayor's chats |
+
+### The baton, as a working self (step 33)
+
+What a resident carries from one session to the next is, today, its latest checkpoint (thread, doing, done, learned, next, blockers), with its SELF.md and its notes beside it. A baton kept by hand on another system, as one file that is the agent's whole working self, shows what a fuller one is worth. Its shape, not its content, informs Babo's:
+
+- **One file, in layers by how often they change.** A *stable* layer at the top, edited rarely and still true in a month (who I am, who the owner is, the house, the terms we use, the dates that matter, where I am); the *moving* layers below, folded in each day. Recognition and competence are the test, not size: nothing is cut to fit a budget that the resident wants to keep.
+- **Wake checks**: what to check first, every time it wakes (how long since the owner was last here, what was promised, what's on fire), before it does anything else.
+- **The fire drill**: if the system is on fire and the owner says "stop it", exactly how to stop each part, and where the backups and credentials live. Short, current, tested.
+- **The job**: what the office is for, and its common tasks, each as the steps it takes.
+- **How the domain works**: what it knows about its part of the world, as knowledge (what is live is looked up, never remembered).
+- **People and the crew chart**: who to call, and when; who does what in the town, and how to reach them (letters, errands, the square), never ephemeral helpers.
+- **The ledger**: what waits on the owner, and what is its own and still open, each with where it stands. It is what *Next* and *Blockers* become.
+- **Doctrine, lessons, limits**: the rules it has been given or has learned, each with its source; what it knows it doesn't know.
+- **Laurels and screwups**: what went well and what went wrong, kept as plainly as each other (a correction is added, never a rewrite).
+- **Texture**: what it wants to keep because it's wanted, not because it's useful. The proof that nothing is forced out.
+- **Map**: pointers, never payloads: where things are, not copies of them.
+- **The log**: dated entries, newest last; old ones rolled up into a line each when the section grows long.
+
+In Babo, the harness keeps its part (when a checkpoint happens, that it is written in the format, that nothing is written behind the resident's back) and the resident writes every word. Checkpoints become the log and the ledger's moving parts; SELF.md becomes the stable layer; the rest are sections the resident fills as it learns them. How the bundle shows it to a small model within its context (whole, or the stable layer always and the rest by section) is part of the step.
 
 ### What Babo does, and what residents do
 

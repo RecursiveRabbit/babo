@@ -7,7 +7,6 @@ const town = (name = "") => ({
   name,
   root: "/home/robin/baton-town",
   residents: [{ id: "mayor", name: "", office: "mayor", status: "active", founded: "", last_active: "", unread: 1, flags: 0 }],
-  board: [],
   pending: { tools: 0, proposals: 1, founding: 0, flags: 0, sessions: 1 },
   last_upkeep: null,
   upkeep: { service: "running", running: false, waiting: ["mayor: 5 hours of activity to review"], waiting_for: "someone used the model in the last 10 minutes",
