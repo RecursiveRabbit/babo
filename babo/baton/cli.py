@@ -718,6 +718,52 @@ def eval_command(
             console.print(f"Kept as {name}'s baseline.")
 
 
+@app.command("trial")
+def trial_command(
+    preset: str = typer.Option("", "--preset", "-p", help="A model preset from Settings › Models (default: the default one)"),
+    only: list[str] = typer.Option([], "--only", help="Only this scenario or category (repeat for several)"),
+    repeat: int = typer.Option(3, "--repeat", help="Run each scenario this many times (models vary from run to run)"),
+    list_scenarios: bool = typer.Option(False, "--list", help="List the scenarios and stop"),
+    config: str | None = _CONFIG_OPT,
+):
+    """The harness end to end: short pieces of work for the Mayor in a throwaway town, judged by what happened.
+    Every model call is recorded in one report, made of nothing from your own town, to share with whoever tunes Babo."""
+    from babo.baton import trial
+    from babo.baton.gateway import Router, default_preset_name, preset_names
+
+    if list_scenarios:
+        table = Table("scenario", "category", "what it checks")
+        for s in trial.SCENARIOS:
+            table.add_row(s.id, s.category, s.what)
+        console.print(table)
+        console.print(f"{len(trial.SCENARIOS)} scenarios.")
+        return
+    t, cfg = _town(config)
+    scenarios = trial.select(only)
+    if not scenarios:
+        _fail(BatonError(f"No scenario or category called {', '.join(only)}; see `babo trial --list`."))
+    name = preset or default_preset_name(cfg)
+    if name not in preset_names(cfg):
+        _fail(BatonError(f"There's no model preset called '{name}'. Presets: {', '.join(preset_names(cfg))}."))
+    model = Router(cfg).resolve(name).model
+    console.print(f"[bold]{name}[/bold] ({model}): {len(scenarios)} scenario(s) × {max(1, repeat)}, each in a throwaway town.")
+
+    def show(o: trial.Outcome) -> None:
+        mark = "[green]pass[/green]" if o.passed else "[red]fail[/red]"
+        extra = f" [dim]({'; '.join(o.problems)})[/dim]" if o.problems else ""
+        console.print(f"  {mark} {o.scenario} #{o.attempt}: {escape(o.why)} ({o.seconds:.0f}s, {o.model_calls} call(s)){extra}")
+
+    report = asyncio.run(trial.run(cfg, name, scenarios, repeat=repeat, model=model, progress=show))
+    path = trial.save(t, report)
+    table = Table("scenario", "passed")
+    for scenario, (done, total) in report.by_scenario().items():
+        table.add_row(scenario, f"{done}/{total}")
+    console.print(table)
+    for problem, count in report.problems().items():
+        console.print(f"  {count}× {problem}")
+    console.print(f"{name}: {report.passed}/{len(report.outcomes)} passed. The report, with every model call: {path}")
+
+
 @app.command("tasks")
 def tasks_command(resident: str = typer.Argument("", help="Only this resident's lists"),
                   all_: bool = typer.Option(False, "--all", help="Lists that are all done too"),
