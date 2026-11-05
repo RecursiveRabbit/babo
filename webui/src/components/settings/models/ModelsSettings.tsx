@@ -5,6 +5,7 @@ import { useModelPresetDrag } from "@/components/settings/models/useModelPresetD
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
@@ -47,7 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import type { ModelAPIConfig, SendThinkingBack, SettingsPayload } from "@/lib/types";
 import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
 import { providerJsonValue } from "@/components/settings/models/providerForm";
 
@@ -59,6 +60,7 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  sendThinkingBack: SendThinkingBack;
   api: ModelAPIConfig | null;
   extraHeaders: string;
   extraQuery: string;
@@ -103,6 +105,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  sendThinkingBack: "auto",
   api: null,
   extraHeaders: "",
   extraQuery: "",
@@ -130,6 +133,7 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    sendThinkingBack: activePreset?.send_thinking_back ?? "auto",
     api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     extraHeaders: providerJsonValue(activePreset?.extra_headers),
     extraQuery: providerJsonValue(activePreset?.extra_query),
@@ -403,6 +407,7 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      sendThinkingBack: preset.send_thinking_back ?? "auto",
       api: preset.api ?? null,
       extraHeaders: providerJsonValue(preset.extra_headers),
       extraQuery: providerJsonValue(preset.extra_query),
@@ -555,6 +560,23 @@ export function ModelsSettings({
         />
       </SettingsRow>
       <EffortNote provider={selectedProvider ?? settings.providers.find((provider) => provider.name === selectedPreset?.resolved_provider)} />
+      <SettingsRow title={tx("settings.models.sendThinkingBack", "Send thinking back")}
+        description={tx("settings.models.sendThinkingBackHelp", "Whether the model's thinking goes back to it with the conversation. Automatic: on where the provider needs it (Moonshot/Kimi), off elsewhere. Always also asks kimi-k2.6 to keep its thinking across turns. Never leaves it out.")}>
+        <SegmentedControl<SendThinkingBack>
+          mode="radio"
+          value={form.sendThinkingBack}
+          ariaLabel={tx("settings.models.sendThinkingBack", "Send thinking back")}
+          options={[
+            { value: "auto", label: tx("settings.models.sendThinkingBackAuto", "Automatic") },
+            { value: "on", label: tx("settings.models.sendThinkingBackOn", "Always") },
+            { value: "off", label: tx("settings.models.sendThinkingBackOff", "Never") },
+          ]}
+          onChange={(sendThinkingBack) => {
+            edits.complete();
+            setForm((prev) => ({ ...prev, sendThinkingBack }));
+          }}
+        />
+      </SettingsRow>
       <Dialog open={advancedOpen} onOpenChange={(open) => {
         if (!open && !creating && edits.needsCompletion()) {
           void edits.commit().then((saved) => { if (saved) setAdvancedOpen(false); });

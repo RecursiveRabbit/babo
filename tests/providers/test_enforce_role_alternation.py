@@ -95,7 +95,7 @@ class TestEnforceRoleAlternation:
         result = LLMProvider._enforce_role_alternation(msgs)
         assert result[1]["role"] == "assistant"
         assert result[1]["tool_calls"] == [{"id": "1"}]
-        assert result[1]["content"] is None
+        assert result[1]["content"] == "Previous reply"  # the earlier turn's text is kept, not dropped
         assert result[2]["role"] == "tool"
 
     def test_consecutive_assistant_does_not_overwrite_existing_tool_call_message(self):
@@ -109,7 +109,7 @@ class TestEnforceRoleAlternation:
         result = LLMProvider._enforce_role_alternation(msgs)
         assert result[1]["role"] == "assistant"
         assert result[1]["tool_calls"] == [{"id": "1"}]
-        assert result[1]["content"] is None
+        assert result[1]["content"] == "Later plain assistant"  # kept, with the calls it came after
         assert result[2]["role"] == "tool"
 
     def test_consecutive_user_messages_preserve_text_before_multimodal_content(self):
@@ -272,3 +272,19 @@ class TestEnforceRoleAlternation:
         result = LLMProvider._enforce_role_alternation(msgs)
         assert result[1]["role"] == "user"
         assert result[1]["content"] == "hello"
+
+
+def test_two_assistant_turns_in_a_row_become_one_with_both_texts_thinking_and_the_later_calls() -> None:
+    """Moonshot rejects two assistant turns in a row; merging them must not lose the first's words or thinking."""
+    msgs = [
+        {"role": "user", "content": "Draw the garden"},
+        {"role": "assistant", "content": "Here it is.", "reasoning_content": "Plan the beds."},
+        {"role": "assistant", "content": [{"type": "text", "text": "(the picture)"}], "reasoning_content": "",
+         "tool_calls": [{"id": "2"}]},
+        {"role": "tool", "content": "sent", "tool_call_id": "2"},
+        {"role": "user", "content": "Thanks"},
+    ]
+    result = LLMProvider._enforce_role_alternation(msgs)
+    assert [m["role"] for m in result] == ["user", "assistant", "tool", "user"]
+    assert result[1]["content"] == [{"type": "text", "text": "Here it is."}, {"type": "text", "text": "(the picture)"}]
+    assert result[1]["reasoning_content"] == "Plan the beds." and result[1]["tool_calls"] == [{"id": "2"}]

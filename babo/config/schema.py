@@ -157,6 +157,9 @@ class ModelPresetConfig(RequestOverrides):
     temperature: float = 0.1
     reasoning_effort: str | None = None
     api: ModelAPIConfig | None = None
+    # Whether the model's thinking goes back with the conversation on later turns: "auto" (what the provider
+    # needs: on for Moonshot/Kimi, whose thinking models expect it on every assistant turn), "on" or "off".
+    send_thinking_back: Literal["auto", "on", "off"] = "auto"
 
     def to_generation_settings(self) -> GenerationSettings:
         return GenerationSettings(

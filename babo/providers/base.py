@@ -351,6 +351,10 @@ _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 class LLMProvider(ABC):
     """Base class for LLM providers."""
 
+    # Whether earlier turns' thinking goes back with the conversation: "auto" (what the provider needs), "on", "off".
+    # Set from the model preset (``send_thinking_back``) when the provider is made.
+    send_thinking_back: str = "auto"
+
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _PERSISTENT_MAX_DELAY = 60
     _PERSISTENT_IDENTICAL_ERROR_LIMIT = 10
@@ -909,6 +913,31 @@ class LLMProvider(ABC):
         return [{"type": "text", "text": str(content)}]
 
     @staticmethod
+    def _merge_assistant_turns(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        """One assistant message from two in a row: their text (or content blocks), thinking and tool calls, in order."""
+        merged = {**first, **second}
+        a, b = first.get("content"), second.get("content")
+        if not a:
+            merged["content"] = b
+        elif not b:
+            merged["content"] = a
+        elif isinstance(a, str) and isinstance(b, str):
+            merged["content"] = (a + "\n\n" + b).strip()
+        else:
+            merged["content"] = [*LLMProvider._content_as_blocks(a), *LLMProvider._content_as_blocks(b)]
+        thoughts = [t for t in (first.get("reasoning_content"), second.get("reasoning_content")) if isinstance(t, str)]
+        if thoughts:
+            merged["reasoning_content"] = "\n\n".join(t for t in thoughts if t)
+        # The second turn's calls win: the first's had no results after them (a turn cut short), and calls without
+        # results are rejected.
+        calls = cast(list[Any], second.get("tool_calls") or first.get("tool_calls") or [])
+        if calls:
+            merged["tool_calls"] = calls
+        else:
+            merged.pop("tool_calls", None)
+        return merged
+
+    @staticmethod
     def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge consecutive same-role messages and drop trailing assistant messages.
 
@@ -931,13 +960,10 @@ class LLMProvider(ABC):
             ):
                 prev = merged[-1]
                 if role == "assistant":
-                    prev_has_tools = bool(prev.get("tool_calls"))
-                    curr_has_tools = bool(msg.get("tool_calls"))
-                    if curr_has_tools:
-                        merged[-1] = dict(msg)
-                        continue
-                    if prev_has_tools:
-                        continue
+                    # Two assistant turns in a row (an image or a note sent between them, say): one turn with
+                    # both, nothing dropped. Some providers (Moonshot) reject two in a row outright.
+                    merged[-1] = LLMProvider._merge_assistant_turns(prev, msg)
+                    continue
                 prev_content = prev.get("content") or ""
                 curr_content = msg.get("content") or ""
                 if isinstance(prev_content, str) and isinstance(curr_content, str):

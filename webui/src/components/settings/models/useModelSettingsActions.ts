@@ -207,6 +207,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          sendThinkingBack: form.sendThinkingBack,
           api: form.api ?? undefined,
           ...(settings.model_request_overrides_supported ? {
             extraHeaders: form.extraHeaders,
@@ -275,6 +276,8 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        sendThinkingBack:
+          form.sendThinkingBack !== (selectedPreset.send_thinking_back ?? "auto") ? form.sendThinkingBack : undefined,
         api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
           ? form.api : undefined,
         ...(settings.model_request_overrides_supported ? {
@@ -346,6 +349,7 @@ export function useModelSettingsActions({
       ),
       temperature: primaryPreset?.temperature ?? settings.agent.temperature,
       reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      sendThinkingBack: "auto",
     }));
     setModelPresetCreating(true);
   };

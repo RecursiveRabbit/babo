@@ -203,6 +203,8 @@ class AnthropicProvider(LLMProvider):
         self, messages: list[dict[str, Any]],
     ) -> tuple[str | list[dict[str, Any]], list[dict[str, Any]]]:
         """Return ``(system, anthropic_messages)``."""
+        if self.send_thinking_back == "off":  # the preset says earlier turns' thinking stays out of the conversation
+            messages = [{k: v for k, v in m.items() if k != "thinking_blocks"} for m in messages]
         system: str | list[dict[str, Any]] = ""
         raw: list[dict[str, Any]] = []
         seen_tool_ids: set[str] = set()

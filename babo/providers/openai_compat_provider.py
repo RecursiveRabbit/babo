@@ -101,6 +101,10 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code-highspeed",
     "k2.6-code-preview",
 })
+# Moonshot's thinking guide: kimi-k2.6 keeps earlier turns' thinking only with ``thinking.keep: "all"`` (default null);
+# kimi-k2.7-code and the K3 models always keep it, and take no ``thinking`` parameter at all.
+_KIMI_KEEP_THINKING_MODELS: frozenset[str] = frozenset({"kimi-k2.6"})
+_KIMI_THINKING_MIN_TOKENS = 16000
 _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code",
     "kimi-k2.7-code-highspeed",
@@ -688,6 +692,14 @@ class OpenAICompatProvider(LLMProvider):
             dumped = str(content)
         return dumped or "(empty)"
 
+    def _replays_thinking(self, spec: ProviderSpec | None) -> bool:
+        """Whether earlier turns' thinking goes back with the conversation (the preset's setting, or the provider's need)."""
+        if self.send_thinking_back == "on":
+            return True
+        if self.send_thinking_back == "off":
+            return False
+        return bool(spec and getattr(spec, "replays_reasoning", False))
+
     def _sanitize_messages(
         self,
         messages: list[dict[str, Any]],
@@ -702,9 +714,9 @@ class OpenAICompatProvider(LLMProvider):
             metadata = self._spec.model_metadata(model or self.default_model)
             force_string_content = metadata is None or "image" not in metadata.input_modalities
         normalize_tool_ids = self._should_normalize_tool_call_ids()
-        strip_reasoning = bool(
-            self._spec
-            and getattr(self._spec, "strip_history_reasoning_content", False)
+        strip_reasoning = self.send_thinking_back == "off" or (
+            self.send_thinking_back != "on"
+            and bool(self._spec and getattr(self._spec, "strip_history_reasoning_content", False))
         )
         if strip_reasoning:
             for msg in sanitized:
@@ -930,6 +942,14 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
+        # Moonshot's thinking models share max_tokens between thinking and answer; its guide asks for at least
+        # 16000 so neither is cut off (8192, the preset default, often is).
+        if (
+            spec is not None and spec.name == "moonshot"
+            and _model_slug(model_name) in (_KIMI_THINKING_MODELS | KIMI_K3_MODELS)
+            and (reasoning_effort or "").lower() not in ("none", "minimal")
+        ):
+            max_tokens = max(max_tokens, _KIMI_THINKING_MIN_TOKENS)
         if (
             spec and getattr(spec, "supports_max_completion_tokens", False)
         ) or _requires_max_completion_tokens(model_name):
@@ -1065,7 +1085,18 @@ class OpenAICompatProvider(LLMProvider):
                 or any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
             )
         )
-        if explicit_thinking or implicit_deepseek_thinking:
+        if self._replays_thinking(spec) and semantic_effort not in ("none", "minimal"):
+            # The provider's thinking models expect earlier turns' thinking back on every assistant message
+            # (Moonshot: preserved thinking), and on the K2.6+ models, kept across turns, not dropped.
+            explicit_thinking = True
+            # "on" also asks for preserved thinking (all of it kept across turns; more input tokens), as Moonshot's
+            # own client does on request; never a keep without the thinking type it goes with.
+            if self.send_thinking_back == "on" and slug in _KIMI_KEEP_THINKING_MODELS:
+                thinking = kwargs.setdefault("extra_body", {}).setdefault("thinking", {})
+                if thinking.get("type") != "disabled":
+                    thinking.setdefault("type", "enabled")
+                    thinking.setdefault("keep", "all")
+        if (explicit_thinking or implicit_deepseek_thinking) and self.send_thinking_back != "off":
             for msg in kwargs["messages"]:
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""

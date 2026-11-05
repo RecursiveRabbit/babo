@@ -21,7 +21,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, NotRequired, TypedDict, cast
 
 import httpx
 
@@ -1135,6 +1135,7 @@ def model_settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "send_thinking_back": preset.send_thinking_back,
                 "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
                 **{
                     field: request_settings.redact_request_secrets(getattr(preset, field))
@@ -1294,6 +1295,17 @@ def _parse_preset_api(
     return api
 
 
+def _parse_send_thinking_back(query: QueryParams) -> Literal["auto", "on", "off"] | None:
+    """Whether a preset sends the model's thinking back with the history: auto, on or off (None if not given)."""
+    raw = query_first_alias(query, "send_thinking_back", "sendThinkingBack")
+    if raw is None:
+        return None
+    value = raw.strip() or "auto"
+    if value == "auto" or value == "on" or value == "off":
+        return value
+    raise WebUISettingsError("send thinking back is auto, on or off")
+
+
 def create_model_configuration(
     config: Config,
     query: QueryParams,
@@ -1353,6 +1365,9 @@ def create_model_configuration(
         reasoning_effort=reasoning_effort,
         api=_parse_preset_api(config, model, provider, query_first(query, "api")),
     )
+    send_back = _parse_send_thinking_back(query)
+    if send_back is not None:
+        candidate.send_thinking_back = send_back
     config.model_presets[name] = _preset_with_request_updates(config, candidate, query)
     if activate_as_primary:
         config.agents.defaults.model_preset = name
@@ -1439,6 +1454,11 @@ def update_model_configuration(
         ).strip() or None
         if preset.reasoning_effort != reasoning_effort:
             preset.reasoning_effort = reasoning_effort
+            changed = True
+    send_back = _parse_send_thinking_back(query)
+    if send_back is not None:
+        if preset.send_thinking_back != send_back:
+            preset.send_thinking_back = send_back
             changed = True
     if "api" in query:
         api = _parse_preset_api(config, preset.model, preset.provider, query_first(query, "api"))
