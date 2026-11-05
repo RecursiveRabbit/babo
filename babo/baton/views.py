@@ -33,16 +33,10 @@ def town_overview(town: Town, cfg: BatonConfig) -> dict[str, Any]:
             "status": r.status, "founded": r.founded, "last_active": r.last_active,
             "unread": len(waiting), "flags": sum(1 for i in waiting if i.kind == "flag"),
         })
-    board: list[dict[str, Any]] = []
-    for path in sorted(town.board.glob("*.md")):
-        meta, body = split_frontmatter(path.read_text(encoding="utf-8"))
-        if meta.get("status", "open") == "open":
-            board.append({"kind": str(meta.get("kind", "")), "author": str(meta.get("author", "?")),
-                          "created": str(meta.get("created", "")), "text": first_line(body, 200)})
     from babo.baton import offices
 
     return {
-        "name": town.name, "root": str(town.root), "residents": residents, "board": board,
+        "name": town.name, "root": str(town.root), "residents": residents,
         "pending": pending_counts(town), "last_upkeep": last_upkeep(town), "upkeep": upkeep_status(town, cfg),
         "offices": offices.overview(town),
     }

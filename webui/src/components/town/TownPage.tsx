@@ -229,15 +229,6 @@ function ResidentsView({ town, transport, onChanged, onError }: {
 
     <OfficesPanel town={town} onChanged={onChanged} onError={onError} />
 
-    <TownSection title={t("town.board", { defaultValue: "Notice board" })}
-      description={t("town.boardHelp", { defaultValue: "The Mayor's posts for you: open roles, requests and move-in requests (decide them in Review)." })}>
-      {town.board.length === 0
-        ? <p className="settings-list-row py-3 text-[13px] text-muted-foreground">{t("town.boardEmpty", { defaultValue: "Nothing open on the board." })}</p>
-        : town.board.map((post, index) => <div key={index} className="settings-list-row py-3">
-          <span className="block text-[13px]">{post.text}</span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">{post.kind} · {post.author}</span>
-        </div>)}
-    </TownSection>
 
     <UpkeepView town={town} transport={transport} onChanged={onChanged} onError={onError} />
 
@@ -479,6 +470,7 @@ function DoctorView({ token }: { token: () => string }) {
     </>}
     </TownSection>
     <EvalPanel />
+    <GuidesPanel />
   </>;
 }
 
@@ -532,7 +524,6 @@ function TownSettingsView({ token, transport, onNotice, onError }: {
             value={draft[s.key] ?? String(s.value)} onChange={(event) => setDraft((current) => ({ ...current, [s.key]: event.target.value }))} />}
       </label>)}
     </TownSection>
-    <GuidesPanel />
   </>;
 }
 

@@ -31,8 +31,8 @@ def test_the_mayor_asks_and_nothing_runs_until_the_owner_decides(town: Town, box
     assert request.access == {"web_fetch": "allow"} and request.commands == ["sudo pacman -S --noconfirm nano"]
     assert gitops.git(town, "log", "-1", "--format=%s").stdout.startswith("Errand from mayor: Install nano.")
     assert views.pending_counts(town)["sessions"] == 1
-    with pytest.raises(BatonError, match="only the mayor"):
-        box("archivist").call("send_errand", resident="inspector", task="x", reason="y")
+    with pytest.raises(BatonError, match="doesn't let you send residents on errands"):
+        box("archivist").call("send_errand", resident="inspector", task="x", reason="y")  # (its profile: errands deny)
 
 
 @pytest.mark.parametrize(("overrides", "message"), [

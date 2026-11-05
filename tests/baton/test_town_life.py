@@ -172,7 +172,7 @@ def test_note_and_town_commands(cli_config: Path, town: Town) -> None:
     assert result.exit_code == 0, result.output
     assert [i.sender for i in unread(town, "archivist")] == ["owner"]
     result = runner.invoke(app, ["town", "-c", str(cli_config)])
-    assert result.exit_code == 0 and "archivist" in result.output and "Board" in result.output
+    assert result.exit_code == 0 and "archivist" in result.output and "Board" not in result.output  # (the notice board is gone; Review has what needs a decision)
     assert runner.invoke(app, ["note", "ghost", "hi", "-c", str(cli_config)]).exit_code == 1
 
 

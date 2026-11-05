@@ -47,8 +47,9 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("files", "Change files", "Write and edit files in its own workspace (what it may read is the Read setting).",
                ("write_file",)),
     Capability("shell", "Run commands", "Run shell commands in its workspace.", ("exec",)),
-    Capability("subagents", "Start crew", "Start temporary helpers for a task; they have no identity or memory of their own.",
-               ("subagent",)),
+    Capability("errands", "Send residents on errands", "Ask for another resident to take on a task in its own session, with "
+               "the access it needs. Nothing runs until you approve each one; residents are never spun up and thrown away.",
+               ("send_errand",)),
     Capability("web_fetch", "Read web pages", "Fetch a web page by its address.", ("web_fetch",)),
     Capability("web_search", "Search the web", "Uses the search provider and key set once in Settings.", ("web_search",)),
     Capability("image_generation", "Make images", "Uses the image provider set once in Settings.", ("generate_image",)),
@@ -118,9 +119,15 @@ def load(town: Town, cfg: BatonConfig, agent: str, office: str) -> Profile:
     if not path.exists():
         return office_profile(cfg, agent, office if agent != NEW_RESIDENTS else "default")
     try:
-        return Profile.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        profile = Profile.model_validate(json.loads(path.read_text(encoding="utf-8")))
     except (ValueError, ValidationError) as exc:
         raise BatonError(f"{path.relative_to(town.root)} is not a valid profile: {exc}") from exc
+    # Profiles from before errands were a permission (and from when there was crew): errands as the office had them.
+    profile.capabilities.pop("subagents", None)
+    if "errands" not in profile.capabilities:
+        office_level = office_profile(cfg, agent, office if agent != NEW_RESIDENTS else "default").level("errands")
+        profile.capabilities["errands"] = office_level
+    return profile
 
 
 def save(town: Town, agent: str, profile: Profile, *, message: str, commit: bool = True) -> None:

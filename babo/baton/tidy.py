@@ -64,9 +64,9 @@ def _tidy_config(path: Path, said: list[str]) -> None:
         toolsets = baton.get("toolsets")
         if isinstance(toolsets, dict):
             for office, names in cast(dict[str, Any], toolsets).items():
-                if isinstance(names, list) and "spawn" in names:
-                    cast(dict[str, Any], toolsets)[office] = ["subagent" if n == "spawn" else n for n in cast(list[Any], names)]
-                    said.append(f"{path}: the {office} toolset's 'spawn' is now 'subagent'")
+                if isinstance(names, list) and ("spawn" in names or "subagent" in names):
+                    cast(dict[str, Any], toolsets)[office] = [n for n in cast(list[Any], names) if n not in ("spawn", "subagent")]
+                    said.append(f"{path}: the {office} toolset no longer starts temporary helpers (work goes to residents, by errand)")
                 names = cast(dict[str, Any], toolsets)[office]
                 if isinstance(names, list) and "request_session" in names:
                     cast(dict[str, Any], toolsets)[office] = ["send_errand" if n == "request_session" else n for n in cast(list[Any], names)]
