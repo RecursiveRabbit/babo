@@ -8,12 +8,12 @@ This guide is not only about how to open a PR. It is also about how we hope to b
 
 ## Maintainers
 
-Maintainers are community stewards who help review, organize, and maintain the project. The list below describes each maintainer's current open-source project responsibilities.
+Before changing anything, read the [handover](docs/baton/HANDOVER.md): what Babo is, the rules every change is held to, and how changes land.
 
-| Maintainer | Role |
-|------------|------|
-| [@re-bin](https://github.com/re-bin) | Project lead; reviews community PRs and handles merges |
-| [@chengyongru](https://github.com/chengyongru) | Reviews community PRs and may approve them; merges are handled by the project lead |
+| Who | Role |
+|-----|------|
+| [@bgrimes-me](https://github.com/bgrimes-me) | Owner; decides what goes in |
+| [@RecursiveRabbit](https://github.com/RecursiveRabbit) | Collaborator; containers and network security (the neoclaw merge) |
 
 ## Contribution Flow
 
@@ -51,13 +51,11 @@ WebUI and remote-host interface changes must follow the [client/host compatibili
 Before making changes, sync your local checkout and create a topic branch.
 
 ```bash
-git fetch upstream
+git fetch origin
 git switch main
-git pull --ff-only upstream main
+git pull --ff-only origin main
 git switch -c your-topic-branch
 ```
-
-Use your primary bgrimes-me/babo remote in place of `upstream` if your checkout uses a different remote name.
 
 Keep unrelated local changes out of the topic branch. If your checkout already has work in progress, use a separate worktree or finish that work before starting a new branch.
 
@@ -157,9 +155,6 @@ The confirmation is an operational commitment, not a cosmetic checkbox. Before a
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.
 
-Please feel free to open an [issue](https://github.com/bgrimes-me/babo/issues), join the community, or simply reach out:
-
-- [Discord](https://discord.gg/MnCvHqpUGB)
-- Email: Xubin Ren (@Re-bin) — <xubinrencs@gmail.com>
+Please feel free to open an [issue](https://github.com/bgrimes-me/babo/issues).
 
 Thank you for spending your time and care on babo. We would love for more people to participate in this community, and we genuinely welcome contributions of all sizes.
