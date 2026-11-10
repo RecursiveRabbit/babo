@@ -62,3 +62,18 @@ def test_an_unrecorded_agent_fails_in_the_terminal_too(town: Town, index_path: P
     _configure(town, index_path, monkeypatch, StubManager())
     result = CliRunner().invoke(cli.app, ["office", "wake", "ghost"])
     assert result.exit_code == 1 and "isn't recorded" in result.output
+
+
+def test_the_ui_verb_targets_the_webui_listener_not_the_health_server() -> None:
+    """In a pod the two are different ports (UI 8843, health 18790); pointing the
+    revoke verb at gateway.host/port would POST at a health endpoint."""
+    from babo.baton import cli as cli_module
+    from babo.config.schema import Config
+
+    cfg = Config.model_validate({
+        "gateway": {"host": "10.0.0.5", "port": 18790},
+        "channels": {"websocket": {"host": "10.0.0.5", "port": 8843}},
+    })
+    assert cli_module._webui_base(cfg) == "http://10.0.0.5:8843"
+    wildcard = Config.model_validate({"channels": {"websocket": {"host": "0.0.0.0", "port": 8843}}})
+    assert cli_module._webui_base(wildcard) == "http://127.0.0.1:8843"

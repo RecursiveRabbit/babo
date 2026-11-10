@@ -1803,8 +1803,21 @@ ui_app = typer.Typer(help="The web interface's operator verbs (the terminal half
 app.add_typer(ui_app, name="ui")
 
 
-def _gateway_base(cfg: Config) -> str:
-    return f"http://{cfg.gateway.host}:{cfg.gateway.port}"
+def _webui_base(cfg: Config) -> str:
+    """The WebUI listener, not the gateway's health server.
+
+    They are different processes-in-one: the SPA, /api and /webui/bootstrap are
+    served by the websocket channel (channels.websocket.host/port); gateway.host/
+    port is the lightweight /health server. Pointing this at gateway.* would make
+    `babo ui revoke-sessions` POST at a health endpoint and fail confusingly —
+    in a pod, where the two ports differ (8843 UI, 18790 health), always.
+    """
+    channel = cfg.channels.websocket if isinstance(cfg.channels.websocket, dict) else {}
+    host = str(channel.get("host") or "127.0.0.1")
+    port = int(channel.get("port") or 8765)
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"  # we are on this machine; talk to it directly
+    return f"http://{host}:{port}"
 
 
 def _post_json(url: str, token: str = "", payload: dict[str, Any] | None = None) -> tuple[int, str]:
@@ -1840,7 +1853,7 @@ def ui_revoke_sessions(config: str | None = _CONFIG_OPT) -> None:
     import json as _json
 
     cfg = _config(config)
-    base = _gateway_base(cfg)
+    base = _webui_base(cfg)
     try:
         import urllib.request
 
