@@ -48,12 +48,21 @@ _OPS: Any = None
 
 
 def _listener() -> str:
-    """Where this WebUI is bound, for the page to show as corroboration (never as auth)."""
+    """Where this WebUI is bound, for the page to show as corroboration (never as auth).
+
+    The WebUI is served by the websocket channel, not the gateway's /health
+    server; in a pod those are different ports (UI 8843, health 18790), so
+    reading gateway.host/port here would print a fact that is false exactly
+    where the line is meant to help prove something.
+    """
     try:
         from babo.config.loader import load_config
 
-        gateway = load_config().gateway
-        return f"{gateway.host}:{gateway.port}"
+        channel = load_config().channels.websocket
+        config = channel if isinstance(channel, dict) else {}
+        host = str(config.get("host") or "127.0.0.1")
+        port = int(config.get("port") or 8765)
+        return f"{host}:{port}"
     except Exception:  # pragma: no cover - a read-only convenience line
         return ""
 

@@ -167,3 +167,19 @@ async def test_unauthorized_reads_are_refused(town: Town, index_path: Path, monk
     routes = _routes(town, index_path, monkeypatch, authorized=False)
     status, _body = await _call(routes, "/api/office")
     assert status == 401
+
+
+async def test_the_office_view_reports_the_ui_listener_not_the_health_port(town: Town, index_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    routes = _routes(town, index_path, monkeypatch)
+    from babo.config.schema import Config
+
+    cfg = Config.model_validate({"baton": {"town": str(town.root), "indexPath": str(index_path),
+                                          "office": {"backend": "stub"}},
+                                 "gateway": {"host": "10.0.0.5", "port": 18790},
+                                 "channels": {"websocket": {"host": "10.0.0.5", "port": 8843}}})
+    monkeypatch.setattr("babo.config.loader.load_config", lambda *_a, **_k: cfg)
+    monkeypatch.setattr(office_api, "_ops", lambda: __import__("babo.office.control", fromlist=["Ops"]).Ops())
+    status, view = await _call(routes, "/api/office")
+    assert status == 200
+    assert view["listener"] == "10.0.0.5:8843", "the UI port, never the health port"
