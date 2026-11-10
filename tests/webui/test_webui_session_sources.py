@@ -88,3 +88,38 @@ def test_a_restart_invalidates_every_session() -> None:
     assert after.instance_id != before.instance_id
     request = Request("/api/office", Headers({"Authorization": f"Bearer {token}"}))
     assert not after.check_api_token(request)
+
+
+def test_a_trusted_listener_keeps_its_rendered_address_and_gets_no_static_route() -> None:
+    """`babo webui` must not rewrite a deliberate bind to loopback, nor mint a
+    token_issue_secret that the trusted-source listener refuses to start with."""
+    from babo.cli.webui_support import _ensure_local_webui_channel
+    from babo.config.schema import Config
+
+    cfg = Config.model_validate({
+        "channels": {"websocket": {"enabled": True, "host": "10.0.0.5", "port": 18790,
+                                   "trusted_sources": ["10.0.0.2/32"]}},
+    })
+    changed = _ensure_local_webui_channel(cfg, port=18790, yes=True)
+    ws = cfg.channels.websocket
+    assert ws["host"] == "10.0.0.5", "the deliberate bind must survive setup"
+    assert ws.get("token_issue_secret", "") == "", "no static issuance route on a trusted listener"
+    assert ws.get("token_issue_path", "") == ""
+    assert ws["trusted_sources"] == ["10.0.0.2/32"]
+    assert WebSocketConfig.model_validate(ws).websocket_requires_token is True, (
+        "a session token is still required for the handshake (the default, not overridden)")
+    assert changed is False, "a complete trusted-listener config needs no first-run mutation"
+
+
+def test_api_routes_do_not_accept_a_token_in_the_query_string() -> None:
+    store = GatewayTokenStore()
+    token = store.issue_api_token(3600)
+    header = Request("/api/office", Headers({"Authorization": f"Bearer {token}"}))
+    assert store.check_api_token(header)
+    in_url = Request(f"/api/office?token={token}", Headers({}))
+    assert not store.check_api_token(in_url), "/api must not authenticate from a URL"
+    # The WebSocket handshake keeps its query carriage: that is its only channel.
+    store2 = GatewayTokenStore()
+    ws_token = store2.issue_api_token(3600)
+    ws = Request(f"/ws?token={ws_token}", Headers({}))
+    assert store2.check_api_token(ws)

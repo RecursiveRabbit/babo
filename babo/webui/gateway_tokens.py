@@ -27,9 +27,12 @@ class GatewayTokenStore:
 
     def check_api_token(self, request: WsRequest) -> bool:
         self._purge_expired_api_tokens()
-        token = bearer_token(request.headers) or query_first(
-            parse_query(request.path), "token"
-        )
+        # The WebSocket handshake has no headers to speak of, so a query token is
+        # its only carriage. HTTP API routes are different: a token in a URL lands
+        # in logs, proxies and referrers, so /api/ accepts the bearer header only.
+        path = getattr(request, "path", "") or ""
+        query_token = None if path.startswith("/api/") else query_first(parse_query(path), "token")
+        token = bearer_token(request.headers) or query_token
         if not token:
             return False
         expiry = self.api_tokens.get(token)
