@@ -22,6 +22,7 @@ const view: OfficeView = {
   ],
   missing: [], drifted: [], unmanaged: [],
   manager: { name: "manager", available: true, said: "" },
+  listener: "10.0.0.2:18790",
   desired: {},
 };
 

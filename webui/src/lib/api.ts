@@ -2079,6 +2079,7 @@ export interface OfficeView {
   drifted: string[];
   unmanaged: string[];
   manager: { name: string; available: boolean; said: string };
+  listener: string;
   desired: Record<string, unknown>;
 }
 

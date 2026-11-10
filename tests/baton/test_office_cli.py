@@ -1,0 +1,64 @@
+"""The office's terminal half: same views and verbs as the page (parity)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from babo.baton import cli
+from babo.baton import projects as project_board
+from babo.baton.town import Town
+from babo.office.backend import StubManager
+from babo.office.model import AgentObserved
+
+
+def _configure(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, manager: StubManager) -> None:
+    from rich.console import Console
+
+    from babo.config.schema import Config
+
+    cfg = Config.model_validate({"baton": {"town": str(town.root), "indexPath": str(index_path)}})
+    monkeypatch.setattr(cli, "_town", lambda _config: (town, cfg))
+    monkeypatch.setattr(cli, "_office_backend", lambda _cfg: manager)
+    monkeypatch.setattr(cli, "console", Console(width=200, force_terminal=False))
+
+
+def test_the_board_shows_lead_crew_and_the_managers_state(town: Town, index_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    slug = project_board.new_project(town, "mayor", "Control plane").slug
+    manager = StubManager(agents={"lead-1": AgentObserved(handle="lead-1", state="alive"),
+                                  "crew-2": AgentObserved(handle="crew-2", state="frozen")})
+    _configure(town, index_path, monkeypatch, manager)
+    run = CliRunner().invoke
+    assert "lead lead-1, crew of 1" in run(cli.app, ["office", "crew", slug, "--lead", "lead-1", "--crew", "crew-2"]).output
+    assert "Recorded" in run(cli.app, ["office", "record", "lead-1", "--resident", "archivist", "--project", slug]).output
+    assert "Recorded" in run(cli.app, ["office", "record", "crew-2", "--resident", "inspector", "--project", slug]).output
+    out = run(cli.app, ["office"]).output
+    assert "lead: lead-1" in out and "crew: crew-2" in out
+    assert "lead-1 (lead): running" in out
+
+
+def test_wake_reports_the_managers_verdict_in_its_own_words(town: Town, index_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    slug = project_board.new_project(town, "mayor", "Control plane").slug
+    manager = StubManager(agents={"crew-2": AgentObserved(handle="crew-2", state="frozen")})
+    _configure(town, index_path, monkeypatch, manager)
+    run = CliRunner().invoke
+    run(cli.app, ["office", "record", "crew-2", "--resident", "inspector", "--project", slug])
+    result = run(cli.app, ["office", "wake", "crew-2"])
+    assert result.exit_code == 0
+    assert "succeeded" in result.output and "woke crew-2" in result.output
+
+
+def test_an_unrecorded_agent_fails_in_the_terminal_too(town: Town, index_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    _configure(town, index_path, monkeypatch, StubManager())
+    result = CliRunner().invoke(cli.app, ["office", "wake", "ghost"])
+    assert result.exit_code == 1 and "isn't recorded" in result.output

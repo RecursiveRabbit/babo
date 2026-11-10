@@ -141,6 +141,9 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
       <p className="text-[12px] text-muted-foreground">
         {t("office.freezeNote", { defaultValue: "A freeze is a pause: the work is kept, the peer is removed, and the Manager's ledger says so. It is not a stop-and-save." })}
       </p>
+      {view.listener && <p className="font-mono text-[11px] text-muted-foreground">
+        {t("office.listener", { defaultValue: "This interface is bound to {{listener}} — shown as a fact; the network rule that refuses other sources is what authenticates, not this line.", listener: view.listener })}
+      </p>}
     </div>
   </div>;
 }

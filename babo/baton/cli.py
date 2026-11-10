@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.console import Console
@@ -1693,3 +1693,105 @@ ALLOW_ALL_WARNING = """[bold yellow]Allow all: the Mayor's errands from this cha
 - Anyone who can talk to him in this chat, and anything he reads (web pages, messages), can lead to commands running.
 - Each request still runs in a resident's opencode session, and is recorded (Town › Review › Recently run).
 - Turn it off when you're done: babo allow-all <chat> --off"""
+
+
+# -- the office -------------------------------------------------------------
+office_app = typer.Typer(help="The office: projects with one lead and a crew, and the agents they run as.",
+                         invoke_without_command=True)
+app.add_typer(office_app, name="office")
+
+
+def _office_backend(cfg: Config) -> object:
+    from babo.office.backend import from_config
+
+    return from_config(cfg.baton)
+
+
+@office_app.callback()
+def office_board(ctx: typer.Context, config: str | None = _CONFIG_OPT) -> None:
+    """The office as the Manager reports it (the same view as the Office page)."""
+    from babo.office import control
+
+    if ctx.invoked_subcommand:
+        return
+    try:
+        t, cfg = _town(config)
+        view = control.office_view(t, _office_backend(cfg))  # type: ignore[arg-type]
+    except BatonError as exc:
+        _fail(exc)
+        return
+    backend = cast(dict[str, object], view["manager"])
+    if not backend.get("available"):
+        console.print(f"[yellow]The Manager can't be read: {backend.get('said')}[/yellow]")
+    for project in cast(list[dict[str, object]], view["projects"]):
+        console.print(f"\n[bold]{project['title']}[/bold] ({project['slug']}) — {project['open_tickets']} open")
+        console.print(f"  lead: {project['lead'] or '(unset)'}   crew: {', '.join(cast(list[str], project['crew'])) or '(none)'}")
+        for agent in cast(list[dict[str, object]], view["agents"]):
+            if agent.get("project") != project["slug"]:
+                continue
+            role = f" ({agent['role']})" if agent.get("role") else ""
+            console.print(f"  - {agent['handle']}{role}: {agent['status']}"
+                          + (f" — {agent['said']}" if agent.get("said") else ""))
+    loose = [a for a in cast(list[dict[str, object]], view["agents"]) if not a.get("project")]
+    for agent in loose:
+        console.print(f"  - {agent['handle']}: {agent['status']}" + (f" — {agent['said']}" if agent.get("said") else ""))
+
+
+def _office_verb(verb: str, handle: str, reason: str, config: str | None) -> None:
+    from babo.office import control
+
+    try:
+        t, cfg = _town(config)
+        control._require_recorded(control.AgentStore(t), handle)
+        op = control.perform_sync(_office_backend(cfg), handle, verb, reason)  # type: ignore[arg-type]
+    except BatonError as exc:
+        _fail(exc)
+        return
+    console.print(f"{op.state}: {op.said}" if op.said else op.state)
+    if op.state != "succeeded":
+        raise typer.Exit(1)
+
+
+@office_app.command("wake")
+def office_wake(handle: str = typer.Argument(...), reason: str = typer.Option("owner: wake from the terminal", "--reason"),
+                config: str | None = _CONFIG_OPT) -> None:
+    """Wake a frozen agent (the Manager's own verb)."""
+    _office_verb("wake", handle, reason, config)
+
+
+@office_app.command("freeze")
+def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option("owner: freeze from the terminal", "--reason"),
+                  config: str | None = _CONFIG_OPT) -> None:
+    """Freeze an agent: a pause — the work is kept; the peer is removed."""
+    _office_verb("freeze", handle, reason, config)
+
+
+@office_app.command("record")
+def office_record(handle: str = typer.Argument(...), resident: str = typer.Option(..., "--resident", "-r"),
+                  project: str = typer.Option("", "--project", "-p"),
+                  desired: str = typer.Option("running", "--desired"), config: str | None = _CONFIG_OPT) -> None:
+    """Record what you want for one agent (desired state only; the Manager still decides)."""
+    from babo.office import control
+
+    try:
+        t, _cfg = _town(config)
+        console.print(control.record_agent(t, {"handle": handle, "resident": resident, "project": project,
+                                               "desired": desired})["message"])
+    except BatonError as exc:
+        _fail(exc)
+
+
+@office_app.command("crew")
+def office_crew(project: str = typer.Argument(...), lead: str = typer.Option("", "--lead"),
+                crew: str = typer.Option("", "--crew", help="Comma-separated agent handles"),
+                config: str | None = _CONFIG_OPT) -> None:
+    """Set a project's one lead and its crew."""
+    from babo.office import control
+
+    try:
+        t, _cfg = _town(config)
+        said = control.change_crew(t, {"project": project, "lead": lead,
+                                       "crew": [h.strip() for h in crew.split(",") if h.strip()]})
+        console.print(said["message"])
+    except BatonError as exc:
+        _fail(exc)

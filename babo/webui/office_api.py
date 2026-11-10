@@ -47,6 +47,17 @@ def _backend() -> Any:
 _OPS: Any = None
 
 
+def _listener() -> str:
+    """Where this WebUI is bound, for the page to show as corroboration (never as auth)."""
+    try:
+        from babo.config.loader import load_config
+
+        gateway = load_config().gateway
+        return f"{gateway.host}:{gateway.port}"
+    except Exception:  # pragma: no cover - a read-only convenience line
+        return ""
+
+
 def _ops() -> Any:
     """The gateway's one in-memory record of actions in flight."""
     global _OPS
@@ -96,7 +107,8 @@ class OfficeRoutes:
         from babo.office import control
 
         if got == "/api/office":
-            return http_json_response(await asyncio.to_thread(control.office_view, _town(), _backend()))
+            listener = _listener()
+            return http_json_response(await asyncio.to_thread(control.office_view, _town(), _backend(), listener))
         if got.startswith("/api/office/ops/"):
             return http_json_response(await asyncio.to_thread(control.op_view, _ops(), got.rsplit("/", 1)[-1]))
         if got == OFFICE_MUTATION_PATHS["office.crew"]:

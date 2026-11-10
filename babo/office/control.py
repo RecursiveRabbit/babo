@@ -60,7 +60,7 @@ class Ops:
         return op
 
 
-def office_view(town: Town, backend: ManagerProtocol) -> dict[str, object]:
+def office_view(town: Town, backend: ManagerProtocol, listener: str = "") -> dict[str, object]:
     """Projects with their crews, plus every managed agent joined to the Manager's answer.
 
     If the Manager can't be read, the page is told exactly that — the desired
@@ -130,6 +130,9 @@ def office_view(town: Town, backend: ManagerProtocol) -> dict[str, object]:
         "drifted": [a.handle for a in live if a.status == model.DRIFTED],
         "unmanaged": [a.handle for a in live if a.status == model.UNMANAGED],
         "manager": {"name": getattr(backend, "name", "unknown"), "available": not unavailable, "said": unavailable},
+        # Corroboration only: the Router's source rule is the wall; a bind address is a fact,
+        # not an authentication check.
+        "listener": listener,
         "desired": {handle: dict(entry) for handle, entry in desired.items()},
     }
 
@@ -189,6 +192,36 @@ async def _poll(backend: ManagerProtocol, op: Op, timeout_s: float, store: Agent
 
 
 POLL_S = 0.5
+
+
+def perform_sync(backend: ManagerProtocol, handle: str, verb: str, reason: str = "",
+                 timeout_s: float = 120.0) -> Op:
+    """The terminal's path: ask, then wait for the Manager's verdict (no event loop).
+
+    The same words the page shows — pending never becomes success by itself.
+    """
+    import time
+
+    if verb not in ACTIONS:
+        raise BatonError(f"there's no '{verb}' action; it's wake or freeze")
+    action_id = backend.act(handle, ACTIONS[verb], reason)
+    op = Op(id=action_id, handle=handle, action=verb)
+    waited = 0.0
+    while True:
+        row = backend.action_status(action_id)
+        op.said = str(row.get("detail") or "")
+        state = str(row.get("state") or "unknown")
+        if state in TERMINAL:
+            op.state = state
+            if state == "succeeded":
+                seen = next((a for a in backend.state() if a.handle == handle), None)
+                op.observed = seen.overview() if seen else None
+            return op
+        if waited >= timeout_s:
+            op.state, op.said = "timeout", f"no verdict from the Manager after {timeout_s:g}s"
+            return op
+        time.sleep(POLL_S)
+        waited += POLL_S
 
 
 def begin(town: Town, backend: ManagerProtocol, ops: Ops, handle: str, verb: str, reason: str = "") -> Op:
