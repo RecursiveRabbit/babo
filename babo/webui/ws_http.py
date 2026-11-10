@@ -78,6 +78,9 @@ from babo.webui.http_utils import (
     is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
 )
 from babo.webui.http_utils import (
+    is_trusted_source_request as _is_trusted_source_request,
+)
+from babo.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
 from babo.webui.http_utils import (
@@ -538,6 +541,19 @@ class GatewayHTTPHandler:
             return response
         return _http_error(404, "WebUI mutation action not found")
 
+    def _handle_tokens_revoke(self, connection: Any) -> Response:
+        """Sign out every browser session on this gateway (operator action).
+
+        The token store is in memory, so this also proves itself: a restart
+        invalidates everything without anyone calling this. The caller's own
+        token dies with the rest — the same power as closing the tab.
+        """
+        issued = len(self.tokens.issued_tokens)
+        api = len(self.tokens.api_tokens)
+        self.tokens.clear()
+        self._log.info("revoked {} client token(s) and {} api token(s) on operator request", issued, api)
+        return _http_json_response({"revoked": issued + api}, extra_headers=_NO_STORE_HEADERS)
+
     def _is_webui_mutation_path(self, path: str) -> bool:
         if path.startswith("/api/remote-instances/"):
             return True
@@ -546,6 +562,8 @@ class GatewayHTTPHandler:
         if re.match(r"^/api/sessions/[^/]+/delete$", path):
             return True
         if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update|change-chat)$", path):
+            return True
+        if path == "/api/webui/tokens/revoke":
             return True
         if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
             return True
@@ -624,6 +642,11 @@ class GatewayHTTPHandler:
         response = await self._dispatch_recovery_route(request, got)
         if response is not None:
             return response
+
+        if got == "/api/webui/tokens/revoke":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            return self._handle_tokens_revoke(connection)
 
         if got == "/api/webui/subagents/cancel":
             return await self._handle_subagent_cancel(request)
@@ -746,6 +769,7 @@ class GatewayHTTPHandler:
     ) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
+        is_trusted_source = _is_trusted_source_request(connection, self.config.trusted_sources)
         is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
             connection,
             request.headers,
@@ -755,8 +779,8 @@ class GatewayHTTPHandler:
             if secret:
                 if not _issue_route_secret_matches(request.headers, secret):
                     return _http_error(401, "Unauthorized")
-            elif not is_local_browser:
-                return _http_error(403, "bootstrap is localhost-only")
+            elif not (is_local_browser or is_trusted_source):
+                return _http_error(403, "bootstrap is localhost-only, or from a configured trusted source")
 
         from babo.webui.client_contract import gateway_identity
 
@@ -782,7 +806,10 @@ class GatewayHTTPHandler:
             }
             return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
-        api_token_allowed = bool(secret) or is_local_browser
+        # A trusted source is an operator arriving over the permitted network path:
+        # they get the same session an operator on loopback gets, including the API
+        # token the pages use. Without this, the UI loads and every API call 401s.
+        api_token_allowed = bool(secret) or is_local_browser or is_trusted_source
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),

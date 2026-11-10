@@ -1795,3 +1795,66 @@ def office_crew(project: str = typer.Argument(...), lead: str = typer.Option("",
         console.print(said["message"])
     except BatonError as exc:
         _fail(exc)
+
+
+# -- the web interface's operator verbs -------------------------------------
+ui_app = typer.Typer(help="The web interface's operator verbs (the terminal half of the UI).",
+                     invoke_without_command=True)
+app.add_typer(ui_app, name="ui")
+
+
+def _gateway_base(cfg: Config) -> str:
+    return f"http://{cfg.gateway.host}:{cfg.gateway.port}"
+
+
+def _post_json(url: str, token: str = "", payload: dict[str, Any] | None = None) -> tuple[int, str]:
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = _json.dumps(payload or {}).encode()
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", "replace") if exc.fp else ""
+
+
+@ui_app.callback()
+def ui_root(ctx: typer.Context) -> None:
+    """Operator verbs for the web interface. Run one."""
+    if ctx.invoked_subcommand:
+        return
+    console.print("Usage: babo ui revoke-sessions   (sign out every browser session)")
+
+
+@ui_app.command("revoke-sessions")
+def ui_revoke_sessions(config: str | None = _CONFIG_OPT) -> None:
+    """Sign out every browser session: the token store is in memory, so this and a
+    restart are the two operator revocations. Running inside the pod, loopback
+    bootstrap issues the token this call needs — no password, no static secret."""
+    import json as _json
+
+    cfg = _config(config)
+    base = _gateway_base(cfg)
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{base}/webui/bootstrap", timeout=10) as response:
+            token = str(_json.loads(response.read().decode()).get("api_token") or "")
+    except Exception as exc:  # pragma: no cover - a gateway that isn't there
+        _fail(BatonError(f"couldn't reach the gateway at {base}: {exc}"))
+        return
+    if not token:
+        _fail(BatonError("the gateway issued no API token from loopback; is token_issue_path set?"))
+        return
+    status, body = _post_json(f"{base}/api/webui/tokens/revoke", token)
+    if status != 200:
+        _fail(BatonError(f"revoke failed ({status}): {body.strip()[:200]}"))
+        return
+    said = _json.loads(body).get("revoked", 0) if body.strip() else 0
+    console.print(f"Signed out every browser session ({said} token(s) cleared).")
