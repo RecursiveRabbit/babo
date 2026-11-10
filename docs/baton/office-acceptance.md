@@ -86,6 +86,39 @@ path. Be precise about what that proves: the rule identifies the **host**, not
 the person. "Authenticated by WireGuard" means "you are on the host"; the page
 cannot tell two people on that host apart, and nobody should read more into it.
 
+## 3b. Operator sessions (the inner half of the same boundary)
+
+The Router admits only the host WG address, and the listener additionally trusts
+exactly one peer address for session issuance. Check both, because a proof that
+only checks the wall cannot tell a working gate from a missing one.
+
+```
+# inside the pod: the boot line must name the trusted source (addresses only)
+journalctl -u babo-gateway -b | grep "WebUI session sources"
+#   -> WebUI session sources: 10.0.0.2/32
+
+# from the host WG address: a session is issued, and the pages work
+curl -s http://<wg-addr>:8843/webui/bootstrap | jq '{token: (.token|length), api_token: (.api_token|length)}'
+#   -> both non-zero. Then drive the one lifecycle action from the page.
+
+# a token in a URL must not authenticate an API call
+curl -s -o /dev/null -w '%{http_code}\n' "http://<wg-addr>:8843/api/office?token=$API_TOKEN"
+#   -> 401
+
+# revoke: every browser session dies, including the one that asked
+#   inside the pod:  babo ui revoke-sessions
+#   then the same browser's next call -> 401
+
+# restart (or rescue): the old token is dead and the work is not
+#   restart the gateway, reuse the old token -> 401
+```
+
+Pass conditions: the boot line names the address; a second source gets nothing
+from the Router *and* nothing from the app; the revoked token fails on the very
+next call; a restarted gateway rejects every pre-restart token. A startup that
+refuses a bad `trusted_sources` value is also a pass — the failure should name
+the value, not start and hope.
+
 ## 4. What to capture for the record
 
 - The two `babo office` outputs from step 1 (Manager up and Manager
