@@ -167,7 +167,7 @@ class StubManager:
             self.agents[handle] = AgentObserved(handle=handle, state="frozen", wg_address=current.wg_address,
                                                 last_activity_at=current.last_activity_at,
                                                 checkouts=(), provenance=current.provenance)
-            row["detail"] = f"froze {handle} (paused; work kept)"
+            row["detail"] = f"froze {handle}: stood down, work pushed, pod released"
         else:
             row["state"] = "refused"
             row["detail"] = f"stub doesn't run '{action}'"

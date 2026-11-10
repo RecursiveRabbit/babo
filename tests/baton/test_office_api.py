@@ -104,7 +104,7 @@ async def test_waking_an_agent_is_pending_then_the_managers_answer(town: Town, i
     assert agent["status"] == "running" and agent["desired"] == "running"
 
 
-async def test_freezing_says_paused_not_stopped_and_saved(town: Town, index_path: Path,
+async def test_freezing_says_released_not_paused_and_not_saved(town: Town, index_path: Path,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
     manager = StubManager(agents={"crew-1": AgentObserved(handle="crew-1", state="alive")})
@@ -112,7 +112,7 @@ async def test_freezing_says_paused_not_stopped_and_saved(town: Town, index_path
     await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
     _status, started = await _call(routes, "/api/office/agents/freeze", {"handle": "crew-1"})
     op = await _settle(routes, started["op"]["id"])
-    assert op["state"] == "succeeded" and "paused" in op["said"]
+    assert op["state"] == "succeeded" and "pod released" in op["said"] and "paused" not in op["said"]
     _status, view = await _call(routes, "/api/office")
     agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
     assert agent["status"] == "frozen"

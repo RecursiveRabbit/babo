@@ -61,9 +61,13 @@ again: pass is a plain "The Manager can't be read: …" line and every agent
    Manager's audit rows). Pass: the page's verdict and the Manager's `state`
    and `detail` are the same words.
 
-Freeze is a pause: the workspace is kept, the peer is removed, and the
-Manager's ledger row says so. It is **not** a destruct/stop-and-save; that is
-`destroy`/`rescue`, which this slice does not put on the page.
+**What freeze actually is (corrected by Soro after the first draft of this
+page):** the agent is asked to stand down and push its work; the pod is then
+released and its credentials are revoked. Wake spawns a **fresh pod** that
+resumes the rescued workspace with new keys. The work is preserved; the
+process does not continue. If the page ever says "paused", it is wrong — a true
+pause would be a different primitive (podman pause/unpause) and a different
+risk surface. `destroy` is separate and is not on the page.
 
 ## 3. The network wall (soro's half, cited here)
 
@@ -78,7 +82,9 @@ curl -s -m 3 -o /dev/null -w '%{http_code}\n' http://<babo-public-or-lan>:18790/
 Pass: 200 from the WG source, refused/timeout from the other. The Office page
 also prints the address it is bound to; that line is corroboration only — the
 Router's source rule is the wall, and no token or password is an alternative
-path.
+path. Be precise about what that proves: the rule identifies the **host**, not
+the person. "Authenticated by WireGuard" means "you are on the host"; the page
+cannot tell two people on that host apart, and nobody should read more into it.
 
 ## 4. What to capture for the record
 

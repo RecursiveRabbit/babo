@@ -8,8 +8,10 @@ never a client-side guess), and nothing about the configuration changes unless
 the Manager said it happened.
 
 The two verbs here are the Manager's, verbatim: ``wake`` and ``freeze``. A
-freeze is a pause — the work is kept; the page must not call it a stop and
-saved.
+freeze asks the agent to stand down and save its work, then releases the pod
+and revokes its credentials; a wake brings a fresh pod up on the rescued
+workspace with new keys. The work survives; the process does not — the page
+must say exactly that.
 """
 
 from __future__ import annotations

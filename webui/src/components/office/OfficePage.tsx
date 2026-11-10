@@ -139,10 +139,10 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
         <span className="font-mono">{result.handle}</span>: {result.text}
       </p>}
       <p className="text-[12px] text-muted-foreground">
-        {t("office.freezeNote", { defaultValue: "A freeze is a pause: the work is kept, the peer is removed, and the Manager's ledger says so. It is not a stop-and-save." })}
+        {t("office.freezeNote", { defaultValue: "Freeze asks the agent to finish its turn and save its work, then releases the pod. Wake resumes that work in a fresh pod with new credentials. Nothing is lost; the process does not continue." })}
       </p>
       {view.listener && <p className="font-mono text-[11px] text-muted-foreground">
-        {t("office.listener", { defaultValue: "This interface is bound to {{listener}} — shown as a fact; the network rule that refuses other sources is what authenticates, not this line.", listener: view.listener })}
+        {t("office.listener", { defaultValue: "This interface is bound to {{listener}} — shown as a fact; the network rule that refuses other sources is the wall. That rule identifies the host, not the person: anyone on the host's WireGuard address is you, as far as this page can tell.", listener: view.listener })}
       </p>}
     </div>
   </div>;

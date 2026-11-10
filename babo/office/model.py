@@ -175,4 +175,7 @@ def join(desired: AgentDesired | None, observed: AgentObserved | None) -> AgentL
     if observed.state == "alive" and desired.desired == "frozen":
         return AgentLive(status=DRIFTED, said="The Manager reports it alive; configuration says frozen.",
                          **common)  # type: ignore[arg-type]
-    return AgentLive(status=UNKNOWN, said=f"The Manager says '{observed.state}'.", **common)  # type: ignore[arg-type]
+    # The Manager reports an unknown state when its own sources disagree, and
+    # names the disagreement in provenance.note. Repeat it — do not pick a winner.
+    note = str(observed.provenance.get("note") or "")
+    return AgentLive(status=UNKNOWN, said=note or f"The Manager says '{observed.state}'.", **common)  # type: ignore[arg-type]

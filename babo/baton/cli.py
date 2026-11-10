@@ -1762,7 +1762,7 @@ def office_wake(handle: str = typer.Argument(...), reason: str = typer.Option("o
 @office_app.command("freeze")
 def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option("owner: freeze from the terminal", "--reason"),
                   config: str | None = _CONFIG_OPT) -> None:
-    """Freeze an agent: a pause — the work is kept; the peer is removed."""
+    """Freeze an agent: it stands down and saves its work, then its pod is released. The work survives; the process does not."""
     _office_verb("freeze", handle, reason, config)
 
 

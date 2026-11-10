@@ -51,3 +51,11 @@ def test_dead_is_the_managers_fact_whatever_the_configuration() -> None:
 def test_an_agent_nobody_recorded_is_unmanaged_never_absorbed() -> None:
     live = model.join(None, _observed())
     assert live.status == model.UNMANAGED and live.handle == "crew-1"
+
+
+def test_a_manager_disagreement_is_unknown_and_repeats_its_note() -> None:
+    live = model.join(_desired(), _observed(state="unknown",
+                                            provenance={"podman": "exited", "record": "alive",
+                                                        "note": "podman says exited; the Manager's record says alive"}))
+    assert live.status == model.UNKNOWN
+    assert "podman says exited" in live.said
