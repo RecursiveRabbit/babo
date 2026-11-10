@@ -2036,3 +2036,81 @@ export function setTownRoundAccess(transport: WebUIMutationTransport, name: stri
   commands?: string[]): Promise<TownRounds & { message: string }> {
   return mutation<TownRounds & { message: string }>(transport, "town.rounds.access", { name, step, access, ...(commands !== undefined ? { commands } : {}) });
 }
+
+// -- The office: projects, a lead, the crew, and the agents they run as --------
+// Desired state lives here; live state is the Manager's answer, never Babo's guess.
+
+export type OfficeRole = "lead" | "crew" | "";
+
+export interface OfficeCheckout { id: string; scope: string; issued_at: string; expires_at: string }
+
+export interface OfficeAgent {
+  handle: string;
+  resident: string;
+  project: string;
+  crew: string;
+  role: OfficeRole;
+  status: string;
+  desired: string | null;
+  observed: string | null;
+  wg_address: string;
+  last_activity_at: string;
+  checkouts: OfficeCheckout[];
+  said: string;
+}
+
+export interface OfficeProject {
+  slug: string;
+  title: string;
+  project_lead: string;
+  status: string;
+  help_wanted: boolean;
+  open_tickets: number;
+  lead: string;
+  crew: string[];
+  crew_recorded: boolean;
+  agents: string[];
+}
+
+export interface OfficeView {
+  projects: OfficeProject[];
+  agents: OfficeAgent[];
+  missing: string[];
+  drifted: string[];
+  unmanaged: string[];
+  manager: { name: string; available: boolean; said: string };
+  desired: Record<string, unknown>;
+}
+
+export interface OfficeOp {
+  id: string;
+  handle: string;
+  action: string;
+  state: "pending" | "running" | "succeeded" | "failed" | "refused" | "timeout" | string;
+  said: string;
+  observed: Record<string, unknown> | null;
+}
+
+export function fetchOffice(token: string, base: string = ""): Promise<OfficeView> {
+  return request<OfficeView>(`${base}/api/office`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+export function fetchOfficeOp(token: string, id: string, base: string = ""): Promise<OfficeOp> {
+  return request<OfficeOp>(`${base}/api/office/ops/${encodeURIComponent(id)}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+/** Wake a frozen agent, or freeze a running one — the Manager's own verbs. */
+export function officeAgentAction(transport: WebUIMutationTransport, handle: string, verb: "wake" | "freeze",
+  reason = ""): Promise<{ state: string; op: OfficeOp }> {
+  return mutation<{ state: string; op: OfficeOp }>(transport, `office.agent.${verb}`, { handle, reason });
+}
+
+/** Record what the owner wants for one agent (desired state only; the Manager still decides). */
+export function recordOfficeAgent(transport: WebUIMutationTransport, change: Record<string, unknown>): Promise<{ message: string; agent: Record<string, unknown> | null }> {
+  return mutation<{ message: string; agent: Record<string, unknown> | null }>(transport, "office.agent.record", change);
+}
+
+/** One lead and a crew per project. */
+export function changeOfficeCrew(transport: WebUIMutationTransport, change: { project: string; lead?: string; crew?: string[] }): Promise<{ message: string; crew: { project: string; lead: string; crew: string[]; exists: boolean } }> {
+  return mutation<{ message: string; crew: { project: string; lead: string; crew: string[]; exists: boolean } }>(transport, "office.crew", change);
+}

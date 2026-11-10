@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { House, PanelLeftClose } from "lucide-react";
+import { Briefcase, House, PanelLeftClose } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -78,12 +78,13 @@ interface SidebarProps {
   onOpenAutomations: () => void;
   onOpenChannels: () => void;
   onOpenTown?: () => void;
+  onOpenOffice?: () => void;
   /** A resident's session chosen in the sidebar: opens it on the Town page. */
   onOpenTownSession?: (session: ResidentSessionRef) => void;
   activeTownSessionId?: string | null;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "channels" | "town" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "channels" | "town" | "office" | null;
   onToggleArchived: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
@@ -228,6 +229,14 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "town"}
           selectionRef={activeActionRef}
           icon={<House className="h-4 w-4" />}
+        />}
+        {props.onOpenOffice && <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.office", { defaultValue: "Office" })}
+          onClick={props.onOpenOffice}
+          active={props.activeUtility === "office"}
+          selectionRef={activeActionRef}
+          icon={<Briefcase className="h-4 w-4" />}
         />}
         <SidebarActionButton
           collapsed={collapsed}

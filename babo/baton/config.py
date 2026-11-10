@@ -96,6 +96,21 @@ class BatonUpkeepConfig(Base):
     retry_after_hours: int = Field(default=6, ge=1)
 
 
+class BatonOfficeConfig(Base):
+    """The office control plane: how Babo reaches the NeoClaw Manager.
+
+    Babo owns desired state and decides actions; the Manager is the only podman
+    socket holder, Router caller and credential minter. ``backend`` is
+    ``manager`` (default) or ``stub`` (no containers; the page says so).
+    ``manager_url`` overrides ``NEOCLAW_MANAGER_URL``; empty everywhere means
+    the Mesh address ``http://10.0.0.3:9200`` — never a loopback fallback.
+    """
+
+    backend: str = "manager"
+    manager_url: str = ""
+    timeout_s: float = Field(default=20.0, gt=0)
+
+
 class BatonOpencodeConfig(Base):
     """Residents other than the Mayor run in opencode (https://opencode.ai)."""
 
@@ -140,6 +155,7 @@ class BatonConfig(Base):
     bundle: BatonBundleConfig = Field(default_factory=BatonBundleConfig)
     upkeep: BatonUpkeepConfig = Field(default_factory=BatonUpkeepConfig)
     opencode: BatonOpencodeConfig = Field(default_factory=BatonOpencodeConfig)
+    office: BatonOfficeConfig = Field(default_factory=BatonOfficeConfig)
     night: BatonNightConfig = Field(default_factory=BatonNightConfig)
     toolsets: dict[str, list[str]] = Field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_TOOLSETS.items()})
     # channel name -> resident id. Unbound channels go to the Mayor.

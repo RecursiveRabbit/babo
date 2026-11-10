@@ -97,6 +97,7 @@ from babo.webui.http_utils import (
 )
 from babo.webui.ingress_policy import WebUIIngressPolicy
 from babo.webui.media_gateway import WebUIMediaGateway
+from babo.webui.office_api import OfficeRoutes
 from babo.webui.recovery import RecoveryActionError
 from babo.webui.session_automations import (
     all_automations_payload,
@@ -454,6 +455,7 @@ class GatewayHTTPHandler:
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
         self.town_routes = TownRoutes(authorized=self.check_api_token, payload=_mutation_payload)
+        self.office_routes = OfficeRoutes(authorized=self.check_api_token, payload=_mutation_payload)
 
     def workspace_project_selection_available(self, connection: Any) -> bool:
         """Return whether an authenticated WebUI may submit a server path.
@@ -539,7 +541,7 @@ class GatewayHTTPHandler:
     def _is_webui_mutation_path(self, path: str) -> bool:
         if path.startswith("/api/remote-instances/"):
             return True
-        if self.settings_routes.is_mutation_path(path) or self.town_routes.is_mutation_path(path):
+        if self.settings_routes.is_mutation_path(path) or self.town_routes.is_mutation_path(path) or self.office_routes.is_mutation_path(path):
             return True
         if re.match(r"^/api/sessions/[^/]+/delete$", path):
             return True
@@ -610,6 +612,11 @@ class GatewayHTTPHandler:
 
         # The town's pages
         response = await self.town_routes.dispatch(request, got)
+        if response is not None:
+            return response
+
+        # The office: projects, crews, and the pods they run in
+        response = await self.office_routes.dispatch(request, got)
         if response is not None:
             return response
 

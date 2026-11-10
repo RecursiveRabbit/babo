@@ -17,6 +17,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
 import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
+import { OfficePage } from "@/components/office/OfficePage";
 import { TownPage } from "@/components/town/TownPage";
 import type { ResidentSessionRef } from "@/components/town/ResidentSessionsList";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -148,7 +149,7 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote" | "town";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote" | "town" | "office";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -293,6 +294,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/town") {
     return { view: "town", activeKey, temporary, settingsSection: "overview" };
+  }
+  if (path === "/office") {
+    return { view: "office", activeKey, temporary, settingsSection: "overview" };
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, temporary, settingsSection: "skills" };
@@ -2216,6 +2220,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenOffice = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "office", activeKey, settingsSection: "overview" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onOpenTownSession = useCallback((session: ResidentSessionRef) => {
     setSessionSearchOpen(false);
     setTownFocus(session);
@@ -2855,10 +2865,11 @@ function Shell({
     onOpenSkills,
     onOpenTown,
     onOpenTownSession,
+    onOpenOffice,
     activeTownSessionId: view === "town" ? townFocus?.id ?? null : null,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels" || view === "town") ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels" || view === "town" || view === "office") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -3175,7 +3186,7 @@ function Shell({
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
-                /> : view === "town" ? <TownPage
+                /> : view === "office" ? <OfficePage onBackToChat={onBackToChat} /> : view === "town" ? <TownPage
                   focus={townFocus}
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
