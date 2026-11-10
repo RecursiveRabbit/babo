@@ -61,8 +61,19 @@ def test_a_manager_disagreement_is_unknown_and_repeats_its_note() -> None:
     assert "podman says exited" in live.said
 
 
-def test_dead_after_a_frozen_record_says_both_facts_and_claims_neither() -> None:
-    live = model.join(_desired(desired="frozen"), _observed(state="dead"))
+def test_dead_against_a_frozen_record_names_both_facts_without_softening() -> None:
+    # The Manager's discriminator: dead = no pod AND no graceful stand-down recorded.
+    live = model.join(_desired(desired="frozen"),
+                      _observed(state="dead", provenance={"podman": "absent", "record": "inactive",
+                                                          "note": "pod gone with no graceful stand-down on record"}))
     assert live.status == model.DEAD
-    assert "dead" in live.said and "frozen" in live.said
-    assert "wake it to find out" in live.said
+    assert "no graceful stand-down" in live.said
+    assert "not that" in live.said
+
+
+def test_a_graceful_stand_down_is_frozen_and_says_why() -> None:
+    live = model.join(_desired(desired="frozen"),
+                      _observed(state="frozen", provenance={"podman": "absent", "record": "inactive",
+                                                            "ended_reason": "idle",
+                                                            "note": "stood down (idle); work preserved"}))
+    assert live.status == model.FROZEN and live.ended_reason == "idle"

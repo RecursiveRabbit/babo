@@ -99,6 +99,11 @@ class AgentObserved:
     checkouts: tuple[Checkout, ...] = ()
     provenance: dict[str, str] = field(default_factory=lambda: cast(dict[str, str], {}))
 
+    @property
+    def ended_reason(self) -> str:
+        """Why the last session ended, when the Manager recorded it (idle, context_limit, crash)."""
+        return str(self.provenance.get("ended_reason") or "")
+
     def overview(self) -> dict[str, object]:
         return {"handle": self.handle, "state": self.state, "wg_address": self.wg_address,
                 "last_activity_at": self.last_activity_at,
@@ -121,13 +126,15 @@ class AgentLive:
     wg_address: str = ""
     last_activity_at: str = ""
     checkouts: tuple[Checkout, ...] = ()
+    ended_reason: str = ""
     said: str = ""
 
     def overview(self) -> dict[str, object]:
         return {"handle": self.handle, "resident": self.resident, "project": self.project, "crew": self.crew,
                 "role": self.role, "status": self.status, "desired": self.desired, "observed": self.observed,
                 "wg_address": self.wg_address, "last_activity_at": self.last_activity_at,
-                "checkouts": [c.overview() for c in self.checkouts], "said": self.said}
+                "checkouts": [c.overview() for c in self.checkouts],
+                "ended_reason": self.ended_reason, "said": self.said}
 
 
 @dataclass(frozen=True)
@@ -159,7 +166,7 @@ def join(desired: AgentDesired | None, observed: AgentObserved | None) -> AgentL
     common = {"handle": desired.handle, "resident": desired.resident, "project": desired.project,
               "crew": desired.crew, "desired": desired.desired, "observed": observed.state,
               "wg_address": observed.wg_address, "last_activity_at": observed.last_activity_at,
-              "checkouts": observed.checkouts}
+              "checkouts": observed.checkouts, "ended_reason": observed.ended_reason}
     if observed.state == "alive" and desired.desired == "running":
         return AgentLive(status=RUNNING, **common)  # type: ignore[arg-type]
     if observed.state == "starting":
@@ -167,15 +174,14 @@ def join(desired: AgentDesired | None, observed: AgentObserved | None) -> AgentL
     if observed.state == "frozen" and desired.desired == "frozen":
         return AgentLive(status=FROZEN, **common)  # type: ignore[arg-type]
     if observed.state == "dead":
-        # Dead is the Manager's fact about the runtime, whatever the configuration
-        # wanted. When the record expected a stand-down, say both facts and claim
-        # neither: the Manager's word is the state, the release may be the cause,
-        # and whether the work survived is not something this page can know.
+        # Dead means the pod is gone and the Manager has no graceful stand-down on
+        # record (crash, or no ending recorded). That is the whole claim; repeat the
+        # Manager's note rather than paraphrasing it, and name the record's
+        # expectation when it differs. No page-side softening.
+        note = str(observed.provenance.get("note") or "The Manager reports this agent dead.")
         if desired.desired == "frozen":
-            return AgentLive(status=DEAD, said="The Manager reports it dead (no pod); the record expects frozen "
-                                              "(stood down, work kept). The Manager doesn't say whether the work "
-                                              "survived — wake it to find out.", **common)  # type: ignore[arg-type]
-        return AgentLive(status=DEAD, said="The Manager reports this agent dead.", **common)  # type: ignore[arg-type]
+            note += " The record expected frozen (stood down with its work kept); this is not that."
+        return AgentLive(status=DEAD, said=note, **common)  # type: ignore[arg-type]
     if observed.state == "frozen" and desired.desired == "running":
         return AgentLive(status=DRIFTED, said="The Manager reports it frozen; configuration says running.",
                          **common)  # type: ignore[arg-type]

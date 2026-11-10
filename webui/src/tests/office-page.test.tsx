@@ -15,10 +15,10 @@ const view: OfficeView = {
   agents: [
     { handle: "dova-agent", resident: "archivist", project: "control-plane", crew: "control-plane", role: "lead",
       status: "running", desired: "running", observed: "alive", wg_address: "10.9.0.5", last_activity_at: "",
-      checkouts: [{ id: "c1", scope: "kimi", issued_at: "", expires_at: "" }], said: "" },
+      checkouts: [{ id: "c1", scope: "kimi", issued_at: "", expires_at: "" }], ended_reason: "", said: "" },
     { handle: "crew-2", resident: "inspector", project: "control-plane", crew: "control-plane", role: "crew",
       status: "frozen", desired: "frozen", observed: "frozen", wg_address: "10.9.0.6", last_activity_at: "",
-      checkouts: [], said: "" },
+      checkouts: [], ended_reason: "idle", said: "" },
   ],
   missing: [], drifted: [], unmanaged: [],
   manager: { name: "manager", available: true, said: "" },
@@ -61,6 +61,7 @@ describe("OfficePage", () => {
     expect(screen.getByText("running")).toBeTruthy();
     expect(screen.getByText("frozen")).toBeTruthy();
     expect(screen.getByText("1 live checkout(s)")).toBeTruthy();
+    expect(screen.getByText("stood down (idle)")).toBeTruthy();
   });
 
   it("asks the Manager to wake a frozen agent and shows its answer", async () => {

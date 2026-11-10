@@ -116,6 +116,7 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
               <span className="min-w-40 font-mono text-[13px]">{handle}</span>
               <span className={cn("rounded border px-2 py-0.5 text-[12px]", tone)}>{status}</span>
               {agent?.role && <span className="text-[12px] text-muted-foreground">{agent.role === "lead" ? t("office.lead", { defaultValue: "Lead" }) : t("office.crewMember", { defaultValue: "Crew" })}</span>}
+              {agent?.status === "frozen" && agent.ended_reason && <span className="text-[11px] text-muted-foreground">{t("office.stoodDown", { defaultValue: "stood down ({{why}})", why: agent.ended_reason })}</span>}
               {agent?.wg_address && <span className="font-mono text-[11px] text-muted-foreground">{agent.wg_address}</span>}
               {agent?.checkouts.length ? <span className="text-[11px] text-muted-foreground">{t("office.checkouts", { defaultValue: "{{n}} live checkout(s)", n: agent.checkouts.length })}</span> : null}
               <span className="ml-auto flex gap-2">

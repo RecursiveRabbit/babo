@@ -2056,6 +2056,7 @@ export interface OfficeAgent {
   wg_address: string;
   last_activity_at: string;
   checkouts: OfficeCheckout[];
+  ended_reason: string;
   said: string;
 }
 
