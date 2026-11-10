@@ -59,3 +59,10 @@ def test_a_manager_disagreement_is_unknown_and_repeats_its_note() -> None:
                                                         "note": "podman says exited; the Manager's record says alive"}))
     assert live.status == model.UNKNOWN
     assert "podman says exited" in live.said
+
+
+def test_dead_after_a_frozen_record_says_both_facts_and_claims_neither() -> None:
+    live = model.join(_desired(desired="frozen"), _observed(state="dead"))
+    assert live.status == model.DEAD
+    assert "dead" in live.said and "frozen" in live.said
+    assert "wake it to find out" in live.said

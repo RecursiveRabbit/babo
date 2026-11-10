@@ -167,7 +167,14 @@ def join(desired: AgentDesired | None, observed: AgentObserved | None) -> AgentL
     if observed.state == "frozen" and desired.desired == "frozen":
         return AgentLive(status=FROZEN, **common)  # type: ignore[arg-type]
     if observed.state == "dead":
-        # Dead is the Manager's fact about the runtime, whatever the configuration wanted.
+        # Dead is the Manager's fact about the runtime, whatever the configuration
+        # wanted. When the record expected a stand-down, say both facts and claim
+        # neither: the Manager's word is the state, the release may be the cause,
+        # and whether the work survived is not something this page can know.
+        if desired.desired == "frozen":
+            return AgentLive(status=DEAD, said="The Manager reports it dead (no pod); the record expects frozen "
+                                              "(stood down, work kept). The Manager doesn't say whether the work "
+                                              "survived — wake it to find out.", **common)  # type: ignore[arg-type]
         return AgentLive(status=DEAD, said="The Manager reports this agent dead.", **common)  # type: ignore[arg-type]
     if observed.state == "frozen" and desired.desired == "running":
         return AgentLive(status=DRIFTED, said="The Manager reports it frozen; configuration says running.",
