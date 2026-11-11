@@ -1,0 +1,280 @@
+"""The native core's lifecycle rules, proven without a pod.
+
+Each case names the frozen entry it holds the code to. Nothing here claims a
+served proof; the runtime is a recording double.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from babo.office.api import ActionRecord
+from babo.office.audit import Store
+from babo.office.core import (
+    HANDLE_LABEL,
+    MANAGED_LABEL,
+    CoreRefusal,
+    Identity,
+    NativeManager,
+    UnknownAction,
+    decide,
+)
+from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
+from babo.office.runtime import ContainerFacts, LaunchSpec
+from tests.baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
+
+NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
+
+
+def _ledger(tmp_path: Path) -> CredentialLedger:
+    ledger = CredentialLedger(Store(tmp_path / "m.db"), clock=NOW)
+    ledger.registry.register(FileAdapter(tmp_path / "creds"))
+    return ledger
+
+
+def _manager(tmp_path: Path, runtime: RecordingRuntime, **kw) -> NativeManager:
+    kw.setdefault("identity_of", lambda handle: Identity("kimi", "project-x"))
+    kw.setdefault(
+        "spec_for",
+        lambda handle, identity: LaunchSpec(
+            name=handle, image="babo-agent:test",
+            labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle},
+        ),
+    )
+    kw.setdefault("executor", lambda fn: fn())
+    deadline = kw.pop("deadline", 5.0)
+    return NativeManager(store=Store(tmp_path / "m.db"), runtime=runtime,
+                         ledger=_ledger(tmp_path), clock=NOW, deadline=deadline, **kw)
+
+
+def _alive(handle: str = "agent-a") -> ContainerFacts:
+    return ContainerFacts(name=handle, state="running", ip="10.89.0.42",
+                          labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle})
+
+
+def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) -> None:
+    # L-01: validation happens before a row exists or a thread starts.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    with pytest.raises(CoreRefusal) as caught:
+        manager.act("agent-a", "explode", "because", actor="evans")
+    assert "it is one of spawn, wake, freeze, rescue, destroy" in str(caught.value)
+    assert manager.store.actions() == []
+    assert runtime.calls == []
+
+
+def test_no_actor_is_refused_and_the_refusal_is_durable(tmp_path: Path) -> None:
+    # A-03 / R5 / U-03: refused by name, visible at the surface, no effect.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    action_id = manager.act("agent-a", "freeze", "because", actor="")
+    record = manager.action(action_id)
+    assert record.state == "refused"
+    assert "no approval recorded for agent-a (asked by <none>)" in record.said
+    assert runtime.calls == []
+    assert manager.store.audit(event="REFUSED")[0].actor == "<none>"
+
+
+def test_no_reason_is_refused_and_names_the_actor(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, RecordingRuntime())
+    record = manager.action(manager.act("agent-a", "freeze", "  ", actor="evans"))
+    assert record.state == "refused"
+    assert "no reason recorded for agent-a (asked by evans)" in record.said
+
+
+def test_refused_actions_leave_no_podman_effect(tmp_path: Path) -> None:
+    # L-03 acceptance: the runtime double records calls, and only the inspect happened.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans"))
+    assert record.state == "refused"
+    assert record.said == "nothing to freeze: no pod for agent-a"
+    assert runtime.calls == [("inspect", "agent-a")]
+
+
+def test_freeze_on_a_pod_that_is_not_alive_names_the_state(tmp_path: Path) -> None:
+    runtime = RecordingRuntime(facts={"agent-a": ContainerFacts(name="agent-a", state="paused")})
+    manager = _manager(tmp_path, runtime)
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans"))
+    assert record.state == "refused"
+    assert record.said == "agent-a is paused, not alive; nothing to freeze"
+
+
+def test_wake_on_an_awake_agent_succeeds_with_its_own_detail(tmp_path: Path) -> None:
+    # L-07(b): a success that says so, not an error and not a fake restart.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, identity_of=None)
+    record = manager.action(manager.act("agent-a", "wake", "check", actor="evans"))
+    assert record.state == "succeeded"
+    assert record.said == "agent-a is already alive; nothing to wake"
+    assert ("run", "agent-a") not in runtime.calls
+
+
+def test_spawn_without_an_identity_or_channel_is_refused(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, RecordingRuntime(), identity_of=None)
+    record = manager.action(manager.act("agent-a", "spawn", "because", actor="evans"))
+    assert record.state == "refused"
+    assert record.said == "no identity/channel recorded for agent-a; cannot spawn"
+
+
+def test_spawn_records_a_launch_and_an_audit_row(tmp_path: Path) -> None:
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans"))
+    assert record.state == "succeeded"
+    assert record.said == "spawned agent-a at 10.89.0.42"
+    launch = manager.store.launch("agent-a")
+    assert launch is not None and launch["state"] == "alive"
+    audit = manager.store.audit(event="SPAWN")
+    assert len(audit) == 1 and audit[0].actor == "evans" and audit[0].reason == "first"
+
+
+def test_a_replayed_final_action_is_a_no_op_with_the_original_detail(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, RecordingRuntime())
+    first = manager.act("agent-a", "spawn", "first", actor="evans")
+    again = manager.act("agent-a", "spawn", "first", actor="evans", action_id=first)
+    assert again == first
+    assert len(manager.store.actions()) == 1
+    assert manager.action(again).said == "spawned agent-a at 10.89.0.42"
+
+
+def test_a_replay_key_cannot_be_reused_for_another_handle_or_verb(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, RecordingRuntime())
+    first = manager.act("agent-a", "spawn", "first", actor="evans")
+    with pytest.raises(CoreRefusal) as caught:
+        manager.act("agent-b", "spawn", "first", actor="evans", action_id=first)
+    assert "belongs to (agent-a, spawn)" in str(caught.value)
+
+
+def test_two_concurrent_spawns_make_one_pod_and_one_refusal(tmp_path: Path) -> None:
+    # L-07(a) / D-6: the per-handle single-flight is what makes "one effect" true.
+    queued: list[object] = []
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime, executor=queued.append)
+    first = manager.act("agent-a", "spawn", "first", actor="evans")
+    second = manager.act("agent-a", "spawn", "again", actor="evans")
+    assert manager.action(first).state == "pending"
+    duplicate = manager.action(second)
+    assert duplicate.state == "refused"
+    assert f"action {first} is already pending for agent-a (spawn); not accepted" in duplicate.said
+    queued[0]()  # let the one accepted action run
+    assert [call for call in runtime.calls if call[0] == "run"] == [("run", "agent-a")]
+    assert manager.action(first).state == "succeeded"
+
+
+def test_freeze_uses_the_agent_handshake_never_a_signal(tmp_path: Path) -> None:
+    # L-06 / soro's note: the stand-down is an agent request; the runtime only
+    # reports absence afterwards. No 'signal' exists on the adapter at all.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    control = RecordingControl(runtime)
+    manager = _manager(tmp_path, runtime, agent_control=control)
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    assert record.state == "succeeded"
+    assert control.calls == ["standdown:agent-a"]
+    assert manager.store.launch("agent-a")["ending"] == "idle"
+    assert manager.store.audit(event="FREEZE")[0].state == "succeeded"
+
+
+def test_a_stand_down_that_never_completes_is_timeout_not_failed(tmp_path: Path) -> None:
+    # L-05: ran past its deadline, outcome unknown — never collapsed into failure.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, agent_control=StubbornControl(), deadline=0.05,
+                       sleep=lambda _s: None)
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    assert record.state == "timeout"
+    assert "outcome is unknown" in record.said
+    # the pod is still there and no credential was revoked on a guess
+    assert runtime.facts["agent-a"].alive
+
+
+def test_destroy_revokes_before_it_removes_and_names_a_partial_failure(tmp_path: Path) -> None:
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime)
+    adapter = TokenAdapter(
+        "generic:", lambda instance, scope: f"generic:https://{instance}.test/{scope}",
+        lambda instance, scope: Minted(secret="s3cr3t"),
+        lambda handle: (_ for _ in ()).throw(RuntimeError("endpoint down")),
+    )
+    manager.ledger.registry.register(adapter)
+    row, _minted = manager.ledger.issue(adapter, "agent-a", "generic-token", boot_id="b1",
+                                        launch_ref="b1:agent-a")
+    # make removal fail: if revocation had not already run, the row would stay open
+    from babo.office.runtime import RuntimeUnavailable
+
+    def _gone(name: str) -> None:
+        raise RuntimeUnavailable("runtime gone")
+
+    runtime.remove = _gone  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans"))
+    assert record.state == "failed"
+    assert "did not remove the pod" in record.said
+    assert manager.store.get_credential(row.id).state == "open"  # revoke tried, failed honestly
+    assert manager.store.audit(event="CREDENTIAL_REVOKE_PARTIAL")
+
+
+def test_destroy_success_revokes_credentials_and_writes_one_teardown_row(tmp_path: Path) -> None:
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime)
+    file_adapter = FileAdapter(tmp_path / "creds")
+    manager.ledger.registry.register(file_adapter)
+    row, minted = manager.ledger.issue(file_adapter, "agent-a", "ssh-key", boot_id="b1",
+                                       launch_ref="b1:agent-a")
+    assert Path(row.locator[len("file:"):]).read_text().strip() == minted.secret
+    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans"))
+    assert record.state == "succeeded"
+    assert manager.store.get_credential(row.id).state == "revoked"
+    assert not Path(row.locator[len("file:"):]).exists()
+    teardown = manager.store.audit(event="TEARDOWN")
+    assert len(teardown) == 1 and teardown[0].actor == "evans"
+
+
+def test_agents_reads_the_runtime_and_keeps_unknown_provenance(tmp_path: Path) -> None:
+    runtime = RecordingRuntime(unavailable="socket refused")
+    manager = _manager(tmp_path, runtime)
+    manager.store.record_launch("agent-a", boot_id="b1", identity="kimi", state="alive")
+    (agent,) = manager.agents()
+    assert agent.state == "unknown"
+    assert agent.provenance["podman"] == "error"
+    assert "socket refused" in agent.provenance["note"]
+
+
+def test_a_destroyed_agent_is_omitted_so_the_join_can_render_missing(tmp_path: Path) -> None:
+    # M7 / D-2: absence after a deliberate destroy must not read `dead`.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    manager.store.record_launch("agent-a", boot_id="b1", identity="kimi", state="inactive",
+                                ending="destroyed")
+    assert manager.agents() == []
+
+
+def test_an_exited_pod_without_a_graceful_end_reads_dead(tmp_path: Path) -> None:
+    runtime = RecordingRuntime(facts={"agent-a": ContainerFacts(name="agent-a", state="exited")})
+    manager = _manager(tmp_path, runtime)
+    (agent,) = manager.agents()
+    assert agent.state == "dead"
+
+
+def test_the_decision_table_is_pure_and_names_the_handle(tmp_path: Path) -> None:
+    assert decide("freeze", None, None, "agent-a").detail == "nothing to freeze: no pod for agent-a"
+    assert decide("rescue", None, None, "agent-a").detail == "nothing to rescue: no pod for agent-a"
+    assert decide("destroy", None, None, "a").detail == "nothing to destroy: no pod for a"
+    assert decide("freeze", ContainerFacts(name="a", state="exited"), None, "a").detail == (
+        "a is exited, not alive; nothing to freeze"
+    )
+
+
+def test_unknown_action_id_is_not_found_not_a_synthesised_failure(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, RecordingRuntime())
+    with pytest.raises(UnknownAction):
+        manager.action("nope")
+
+
+def test_the_manager_satisfies_the_office_interface(tmp_path: Path) -> None:
+    from babo.office.api import OfficeManager
+
+    assert isinstance(_manager(tmp_path, RecordingRuntime()), OfficeManager)
+    assert isinstance(_manager(tmp_path, RecordingRuntime()).action, object)
+    assert ActionRecord(id="x", handle="a", action="spawn").terminal is False
