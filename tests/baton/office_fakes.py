@@ -22,6 +22,7 @@ class FakeCore:
     fail: set[str] = field(default_factory=set)  # action names that come back `failed`
     unavailable: str = ""
     actions: dict[str, ActionRecord] = field(default_factory=dict)
+    audit: list[tuple[str, str, str, str]] = field(default_factory=list)
     _next: int = 0
 
     def health(self) -> tuple[bool, str]:
@@ -35,10 +36,17 @@ class FakeCore:
         return list(self.agents_by_handle.values())
 
     def act(self, handle: str, action: str, reason: str, *,
-            actor: str = "", action_id: str | None = None) -> str:
+            actor: str = "", actor_source: str = "", action_id: str | None = None) -> str:
         del reason
-        if not actor:
-            raise ValueError(f"refused: no actor for {action} on {handle}")
+        if not actor or not actor_source:
+            # R5: no actor, no effect — refused by name, not "failed".
+            self._next += 1
+            refused_id = f"act-{self._next}"
+            self.actions[refused_id] = ActionRecord(
+                id=refused_id, handle=handle, action=action, state="refused",
+                said=f"refused: {action} on {handle} names no actor")
+            return refused_id
+        self.audit.append((handle, action, actor, actor_source))
         if action_id and action_id in self.actions:
             existing = self.actions[action_id]
             if existing.handle != handle or existing.action != action:

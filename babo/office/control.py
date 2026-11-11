@@ -21,8 +21,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from babo.baton import projects as project_board
-from babo.baton.town import OWNER, BatonError, Town
+from babo.baton.town import BatonError, Town
 from babo.office import model
+from babo.office.actors import Actor
 from babo.office.api import ActionRecord, CoreNotBuiltError, OfficeManager
 from babo.office.store import AgentStore, CrewStore
 
@@ -199,8 +200,8 @@ async def _poll(core: OfficeManager, op: Op, timeout_s: float, store: AgentStore
 POLL_S = 0.5
 
 
-def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
-                 timeout_s: float = 120.0, actor: str = OWNER, store: AgentStore | None = None) -> Op:
+def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str, *, store: AgentStore,
+                 actor: Actor, timeout_s: float = 120.0) -> Op:
     """The terminal's path: ask, then wait for the core's verdict (no event loop).
 
     The same words the page shows — pending never becomes success by itself —
@@ -211,7 +212,7 @@ def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
     if verb not in ACTIONS:
         raise BatonError(f"there's no '{verb}' action; it is one of: {', '.join(ACTIONS)}")
     try:
-        action_id = core.act(handle, verb, reason, actor=actor)
+        action_id = core.act(handle, verb, reason, actor=actor.name, actor_source=actor.source)
     except CoreNotBuiltError as exc:
         raise BatonError(str(exc)) from exc
     op = Op(id=action_id, handle=handle, action=verb)
@@ -223,10 +224,7 @@ def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
             op.state, op.said = "refused", str(exc)
             return op
         if row.state in TERMINAL:
-            if store is not None:
-                _settle(core, op, store, row)
-            else:
-                op.state, op.said = row.state, row.said
+            _settle(core, op, store, row)
             return op
         if waited >= timeout_s:
             op.state, op.said = "timeout", f"no verdict from the manager core after {timeout_s:g}s"
@@ -235,8 +233,8 @@ def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
         waited += POLL_S
 
 
-def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, reason: str = "",
-          actor: str = OWNER, action_id: str | None = None) -> Op:
+def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, reason: str,
+          *, actor: Actor, action_id: str | None = None) -> Op:
     """Ask the core for one action and start following it. Pending until it answers."""
     if verb not in ACTIONS:
         raise BatonError(f"there's no '{verb}' action; it is one of: {', '.join(ACTIONS)}")
@@ -244,7 +242,8 @@ def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, rea
     # No local "is it recorded?" gate: that precondition is the core's (L-03) and
     # it refuses by name, so both doors get one refusal instead of two behaviours.
     try:
-        core_id = core.act(handle, verb, reason, actor=actor, action_id=action_id)
+        core_id = core.act(handle, verb, reason, actor=actor.name, actor_source=actor.source,
+                           action_id=action_id)
     except CoreNotBuiltError as exc:
         raise BatonError(str(exc)) from exc
     op = ops.add(core_id, handle, verb)

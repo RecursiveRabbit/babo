@@ -169,7 +169,13 @@ class OfficeRoutes:
             action_id = str(replay)[:64] if isinstance(replay, str) and replay.strip() else None
             # The record read is small; keeping it on this loop lets the action's
             # follow-up task be created here, with the Manager call in a thread.
-            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason, action_id=action_id)
+            from babo.office.actors import operator_actor
+
+            # The actor is the authenticated operator session, obtained here — the
+            # request body never supplies it (a client that names itself is not
+            # evidence), and there is no constant default to fall back on.
+            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason,
+                               actor=operator_actor(), action_id=action_id)
             return http_json_response({"state": "pending", "op": op.overview()}, status=202)
         return http_error(404, "No such office route")
 

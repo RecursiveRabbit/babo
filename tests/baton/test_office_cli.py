@@ -53,6 +53,9 @@ def test_wake_reports_the_managers_verdict_in_its_own_words(town: Town, index_pa
     result = run(cli.app, ["office", "wake", "crew-2"])
     assert result.exit_code == 0
     assert "succeeded" in result.output and "woke crew-2" in result.output
+    # the actor is an obtained identity with a source, not a constant default
+    handle, action, name, source = manager.audit[-1]
+    assert (action, source) == ("wake", "terminal") and name
 
 
 def test_an_unrecorded_agent_fails_in_the_terminal_too(town: Town, index_path: Path,

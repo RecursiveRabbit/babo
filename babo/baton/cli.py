@@ -1738,13 +1738,18 @@ def office_board(ctx: typer.Context, config: str | None = _CONFIG_OPT) -> None:
         console.print(f"  - {agent['handle']}: {agent['status']}" + (f" — {agent['said']}" if agent.get("said") else ""))
 
 
-def _office_verb(verb: str, handle: str, reason: str, config: str | None) -> None:
+def _office_verb(verb: str, handle: str, reason: str, config: str | None,
+                 actor_name: str = "") -> None:
     from babo.office import control
+    from babo.office.actors import terminal_actor
 
     try:
         t, cfg = _town(config)
+        # The terminal's actor is the OS user running this command (or --actor),
+        # never a constant: if it can't be determined, the action is refused.
+        actor = terminal_actor(actor_name)
         op = control.perform_sync(_office_core(cfg), handle, verb, reason,
-                                  store=control.AgentStore(t))  # type: ignore[arg-type]
+                                  store=control.AgentStore(t), actor=actor)  # type: ignore[arg-type]
     except BatonError as exc:
         _fail(exc)
         return
@@ -1754,38 +1759,43 @@ def _office_verb(verb: str, handle: str, reason: str, config: str | None) -> Non
 
 
 @office_app.command("wake")
-def office_wake(handle: str = typer.Argument(...), reason: str = typer.Option("owner: wake from the terminal", "--reason"),
+def office_wake(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
                 config: str | None = _CONFIG_OPT) -> None:
-    """Wake a frozen agent (the Manager's own verb)."""
-    _office_verb("wake", handle, reason, config)
+    """Wake a frozen agent (the core's own verb)."""
+    _office_verb("wake", handle, reason or "wake", config, actor)
 
 
 @office_app.command("freeze")
-def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option("owner: freeze from the terminal", "--reason"),
+def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                  actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
                   config: str | None = _CONFIG_OPT) -> None:
     """Freeze an agent: it stands down and saves its work, then its pod is released. The work survives; the process does not."""
-    _office_verb("freeze", handle, reason, config)
+    _office_verb("freeze", handle, reason or "freeze", config, actor)
 
 
 @office_app.command("spawn")
-def office_spawn(handle: str = typer.Argument(...), reason: str = typer.Option("owner: spawn from the terminal", "--reason"),
+def office_spawn(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                 actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
                  config: str | None = _CONFIG_OPT) -> None:
     """Bring one agent up for the first time (the core decides whether it may)."""
-    _office_verb("spawn", handle, reason, config)
+    _office_verb("spawn", handle, reason or "spawn", config, actor)
 
 
 @office_app.command("rescue")
-def office_rescue(handle: str = typer.Argument(...), reason: str = typer.Option("owner: rescue from the terminal", "--reason"),
+def office_rescue(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                  actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
                   config: str | None = _CONFIG_OPT) -> None:
     """Preserve the work, replace the pod and its credentials (the core's own semantics)."""
-    _office_verb("rescue", handle, reason, config)
+    _office_verb("rescue", handle, reason or "rescue", config, actor)
 
 
 @office_app.command("destroy")
-def office_destroy(handle: str = typer.Argument(...), reason: str = typer.Option("owner: destroy from the terminal", "--reason"),
+def office_destroy(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                   actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
                    config: str | None = _CONFIG_OPT) -> None:
     """Tear the agent down and revoke what it holds. The work is not preserved."""
-    _office_verb("destroy", handle, reason, config)
+    _office_verb("destroy", handle, reason or "destroy", config, actor)
 
 
 @office_app.command("record")

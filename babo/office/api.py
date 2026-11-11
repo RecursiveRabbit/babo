@@ -86,7 +86,7 @@ class OfficeManager(Protocol):
         ...
 
     def act(self, handle: str, action: str, reason: str, *,
-            actor: str = "", action_id: str | None = None) -> str:
+            actor: str = "", actor_source: str = "", action_id: str | None = None) -> str:
         """Ask for one lifecycle action; returns the core's action id.
 
         ``actor`` is who is asking. The core refuses by name when it is absent —
@@ -94,6 +94,10 @@ class OfficeManager(Protocol):
         rather than inventing a default. The product supplies it server-side
         (the owner, from the authenticated surface); it is never taken from a
         request body, because a client that names itself is not evidence.
+
+        ``actor_source`` says how the surface obtained that name
+        (``webui-session``, ``terminal``); a name with no provenance is not an
+        identity, it is a string that satisfied a check.
 
         ``action_id`` is the caller's replay key. Replaying the same id returns
         the same action and does nothing; a different handle or verb under a

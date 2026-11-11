@@ -91,3 +91,36 @@ def test_a_core_that_imports_but_breaks_is_not_reported_as_unbuilt(monkeypatch) 
         assert executed["ran"] is True
     else:  # pragma: no cover
         raise AssertionError("a broken core must not be reported as unbuilt")
+
+
+def test_the_actor_is_obtained_not_defaulted() -> None:
+    """R13: the surface must not supply an identity it did not obtain.
+
+    An action with no actor is refused by the core before any effect, and the
+    two doors obtain the name differently — the operator session for the page,
+    the OS user for the terminal — so "who asked" is evidence, not a constant
+    that satisfied a non-empty check.
+    """
+    import pytest
+
+    from babo.office.actors import Actor, operator_actor, terminal_actor
+
+    with pytest.raises(Exception):
+        Actor(name="", source="webui-session")
+    with pytest.raises(Exception):
+        Actor(name="owner", source="")
+
+    page = operator_actor()
+    assert (page.name, page.source) == ("owner", "webui-session")
+    shell = terminal_actor()
+    assert shell.source == "terminal" and shell.name
+    assert terminal_actor("someone").name == "someone"
+
+
+async def test_an_action_with_no_actor_is_refused_by_the_core() -> None:
+    from tests.baton.office_fakes import FakeCore
+
+    core = FakeCore()
+    action_id = core.act("crew-1", "wake", "test", actor="", actor_source="")
+    assert core.action(action_id).state == "refused"
+    assert "names no actor" in core.action(action_id).said
