@@ -1,6 +1,9 @@
 """The Manager's side of the hop: handlers, validation, and the peer check.
 
-D-12 makes the UI the only caller. That is enforced twice on purpose — the
+D-12 makes the UI the only caller: as ruled, the UI pod is 10.0.0.11 and the
+Manager (this service) is 10.0.0.12. Neither number is a default here — the peer
+list is a required argument, so the render owns the values and this module only
+compares what it is given. That is enforced twice on purpose — the
 Router admits only the UI pod's address to this port, and these handlers compare
 the **socket peer** to that same exact address, header-blind. A wrong network
 rule therefore still gets a 403 from the application rather than an open door.
