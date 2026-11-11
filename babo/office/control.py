@@ -24,12 +24,12 @@ from babo.baton import projects as project_board
 from babo.baton.town import BatonError, Town
 from babo.office import model
 from babo.office.actors import Actor
-from babo.office.api import ActionRecord, CoreNotBuiltError, OfficeManager
+from babo.office.api import ACTIONS, TERMINAL, ActionRecord, CoreNotBuiltError, OfficeManager
 from babo.office.store import AgentStore, CrewStore
 
-# What the page and CLI may ask for, straight from the interface's vocabulary.
-ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy")
-TERMINAL = ("succeeded", "failed", "refused", "timeout")
+# ACTIONS and TERMINAL are the interface's vocabulary, imported — not restated.
+# A second literal tuple here would drift the moment the interface changed, and
+# the page would keep accepting a verb the core no longer had.
 
 
 @dataclass

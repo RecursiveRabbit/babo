@@ -143,3 +143,20 @@ async def test_an_action_with_no_actor_is_refused_by_the_core() -> None:
     action_id = core.act("crew-1", "wake", "test", actor="", actor_source="")
     assert core.action(action_id).state == "refused"
     assert "names no actor" in core.action(action_id).said
+
+
+def test_the_vocabulary_is_declared_once() -> None:
+    """The action and terminal-state tuples live in the interface only.
+
+    A second literal in control.py would drift the moment the interface changed,
+    and the page would keep accepting a verb the core no longer had — the same
+    duplicate-vocabulary class bomu flagged.
+    """
+    import inspect
+
+    from babo.office import control
+
+    source = inspect.getsource(control)
+    assert "TERMINAL = (" not in source and "ACTIONS = (" not in source
+    assert control.ACTIONS is api.ACTIONS
+    assert control.TERMINAL is api.TERMINAL
