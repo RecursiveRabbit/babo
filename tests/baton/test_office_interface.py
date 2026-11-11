@@ -137,7 +137,7 @@ def test_the_actor_is_obtained_not_defaulted() -> None:
 
 
 async def test_an_action_with_no_actor_is_refused_by_the_core() -> None:
-    from tests.baton.office_fakes import FakeCore
+    from baton.office_fakes import FakeCore
 
     core = FakeCore()
     action_id = core.act("crew-1", "wake", "test", actor="", actor_source="")

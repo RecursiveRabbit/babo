@@ -10,7 +10,7 @@ from babo.baton import cli
 from babo.baton import projects as project_board
 from babo.baton.town import Town
 from babo.office.model import AgentObserved
-from tests.baton.office_fakes import FakeCore
+from baton.office_fakes import FakeCore
 
 
 def _configure(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, manager: FakeCore) -> None:
