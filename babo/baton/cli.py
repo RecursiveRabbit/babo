@@ -1965,6 +1965,11 @@ def ui_revoke_sessions(config: str | None = _CONFIG_OPT) -> None:
     cfg = _config(config)
     base = _webui_base(cfg)
     status, body = _get_json(f"{base}/webui/bootstrap")
+    if status == 0:
+        # A transport problem, not an auth one: name the socket and the OS error,
+        # because "no token issued" would send the reader looking at the wrong door.
+        _fail(BatonError(f"couldn't reach the gateway at {base}: {body.strip()[:200]}"))
+        return
     token = str(_json.loads(body).get("api_token") or "") if status == 200 and body.strip() else ""
     if not token:
         _fail(BatonError(f"the gateway issued no API token ({status}) at {base}; "
