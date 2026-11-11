@@ -30,6 +30,12 @@ def _named(exc: BaseException, *names: str) -> bool:
     """
     return type(exc).__name__ in names
 
+# The handle a restart-ui action carries: the UI *pod's* name, because the audit
+# row must name something an operator can look up, and the core's dispatch does a
+# real container lookup. A synthetic "ui" would be neither an agent handle nor a
+# pod name — an illegible row and an impossible lookup (soro's H-5).
+UI_POD = "babo-ui"
+
 # A body may carry these and nothing else; unknown keys are refused rather than
 # ignored, because an ignored key is a client believing it changed something.
 ACTION_FIELDS = frozenset({"handle", "action", "reason", "actor", "actor_source", "action_id"})
@@ -111,7 +117,7 @@ class ManagerService:
         if not reason or not actor or not actor_source:
             return 400, {"detail": "missing reason, actor or actor_source"}
         try:
-            action_id = self.core.act("ui", "restart-ui", reason, actor=actor, actor_source=actor_source,
+            action_id = self.core.act(UI_POD, "restart-ui", reason, actor=actor, actor_source=actor_source,
                                       action_id=str(replay) if isinstance(replay, str) and replay else None)
         except Exception as exc:
             if not _named(exc, "CoreRefusalError", "RefusalError"):

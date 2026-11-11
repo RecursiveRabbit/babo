@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from babo.office import hop
+from babo.office import hop, service
 from babo.office.actors import Actor
 from babo.office.model import AgentObserved
 from babo.office.service import ManagerService
@@ -27,7 +27,7 @@ def test_a_transport_failure_is_a_value_never_an_exception() -> None:
     def broken(method: str, url: str, body: object, timeout_s: float) -> tuple[int, str]:
         raise OSError("connection refused")
 
-    client = hop.HopClient("http://10.0.0.3:9200", transport=broken)
+    client = hop.HopClient("http://manager.invalid:8844", transport=broken)
     result = client.health()
     assert result.unavailable and "connection refused" in result.said
     assert result.payload == {}
@@ -40,7 +40,7 @@ def test_the_client_passes_the_managers_words_through_untouched() -> None:
         seen.append({"method": method, "url": url, "body": body})
         return 202, json.dumps({"action_id": "act-1"})
 
-    client = hop.HopClient("http://10.0.0.3:9200", transport=transport)
+    client = hop.HopClient("http://manager.invalid:8844", transport=transport)
     result = client.act("crew-1", "wake", "owner asked", actor=Actor("owner", "webui-session"), action_id="k1")
     assert result.ok and result.payload["action_id"] == "act-1"
     assert seen[0]["body"] == {"handle": "crew-1", "action": "wake", "reason": "owner asked",
@@ -126,12 +126,13 @@ def test_a_degraded_core_is_503_with_its_own_words() -> None:
 def test_restart_ui_is_an_action_not_a_side_door() -> None:
     """H-3: same actor/reason rule, same closed states, same idempotency key."""
     core = _core()
-    core.agents_by_handle["ui"] = AgentObserved(handle="ui", state="alive")
+    core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
     svc = ManagerService(core=core, ui_peers=(UI,))
     assert svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "o", "actor_source": "terminal"})[0] == 403
     assert svc.restart_ui(UI, {"reason": "r", "actor": "o"})[0] == 400
     status, payload = svc.restart_ui(UI, {"reason": "invalidate sessions", "actor": "owner",
                                           "actor_source": "webui-session", "action_id": "r1"})
     assert status == 202
+    assert core.audit[-1][0] == service.UI_POD, "the audit row names the pod, not a synthetic handle"
     assert core.audit[-1][1] == "restart-ui"
     assert svc.action(UI, payload["action_id"])[1]["state"] == "succeeded"

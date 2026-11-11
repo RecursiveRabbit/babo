@@ -146,7 +146,7 @@ async def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page(town: 
 async def test_an_unreachable_manager_is_shown_as_unknown_not_running(town: Town, index_path: Path,
                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
-    manager = FakeCore(unavailable="can't reach the Manager at http://10.0.0.3:9200")
+    manager = FakeCore(unavailable="the manager core is unavailable")
     routes = _routes(town, index_path, monkeypatch, manager=manager)
     await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
     status, view = await _call(routes, "/api/office")
