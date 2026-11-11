@@ -61,7 +61,7 @@ def test_an_unrecorded_agent_fails_in_the_terminal_too(town: Town, index_path: P
 
     _configure(town, index_path, monkeypatch, FakeCore())
     result = CliRunner().invoke(cli.app, ["office", "wake", "ghost"])
-    assert result.exit_code == 1 and "isn't recorded" in result.output
+    assert result.exit_code == 1 and "refused" in result.output and "record it first" in result.output
 
 
 def test_the_ui_verb_targets_the_webui_listener_not_the_health_server() -> None:

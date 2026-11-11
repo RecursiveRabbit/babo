@@ -1743,8 +1743,8 @@ def _office_verb(verb: str, handle: str, reason: str, config: str | None) -> Non
 
     try:
         t, cfg = _town(config)
-        control._require_recorded(control.AgentStore(t), handle)
-        op = control.perform_sync(_office_core(cfg), handle, verb, reason)  # type: ignore[arg-type]
+        op = control.perform_sync(_office_core(cfg), handle, verb, reason,
+                                  store=control.AgentStore(t))  # type: ignore[arg-type]
     except BatonError as exc:
         _fail(exc)
         return
@@ -1765,6 +1765,27 @@ def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option(
                   config: str | None = _CONFIG_OPT) -> None:
     """Freeze an agent: it stands down and saves its work, then its pod is released. The work survives; the process does not."""
     _office_verb("freeze", handle, reason, config)
+
+
+@office_app.command("spawn")
+def office_spawn(handle: str = typer.Argument(...), reason: str = typer.Option("owner: spawn from the terminal", "--reason"),
+                 config: str | None = _CONFIG_OPT) -> None:
+    """Bring one agent up for the first time (the core decides whether it may)."""
+    _office_verb("spawn", handle, reason, config)
+
+
+@office_app.command("rescue")
+def office_rescue(handle: str = typer.Argument(...), reason: str = typer.Option("owner: rescue from the terminal", "--reason"),
+                  config: str | None = _CONFIG_OPT) -> None:
+    """Preserve the work, replace the pod and its credentials (the core's own semantics)."""
+    _office_verb("rescue", handle, reason, config)
+
+
+@office_app.command("destroy")
+def office_destroy(handle: str = typer.Argument(...), reason: str = typer.Option("owner: destroy from the terminal", "--reason"),
+                   config: str | None = _CONFIG_OPT) -> None:
+    """Tear the agent down and revoke what it holds. The work is not preserved."""
+    _office_verb("destroy", handle, reason, config)
 
 
 @office_app.command("record")

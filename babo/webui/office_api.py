@@ -26,8 +26,11 @@ from babo.webui.http_utils import http_error, http_json_response
 OFFICE_MUTATION_PATHS = {
     "office.crew": "/api/office/crew",
     "office.agent.record": "/api/office/agents/record",
+    "office.agent.spawn": "/api/office/agents/spawn",
     "office.agent.wake": "/api/office/agents/wake",
     "office.agent.freeze": "/api/office/agents/freeze",
+    "office.agent.rescue": "/api/office/agents/rescue",
+    "office.agent.destroy": "/api/office/agents/destroy",
 }
 
 
@@ -157,14 +160,16 @@ class OfficeRoutes:
             return http_json_response(await asyncio.to_thread(control.change_crew, _town(), self._body(request)))
         if got == OFFICE_MUTATION_PATHS["office.agent.record"]:
             return http_json_response(await asyncio.to_thread(control.record_agent, _town(), self._body(request)))
-        if got in (OFFICE_MUTATION_PATHS["office.agent.wake"], OFFICE_MUTATION_PATHS["office.agent.freeze"]):
+        if got in OFFICE_MUTATION_PATHS.values() and got.startswith("/api/office/agents/"):
             body = self._body(request)
-            verb = "wake" if got.endswith("/wake") else "freeze"
+            verb = got.rsplit("/", 1)[-1]
             handle = _text(body, "handle", 63).lower()
             reason = str(body.get("reason") or "")[:400]
+            replay = body.get("action_id")
+            action_id = str(replay)[:64] if isinstance(replay, str) and replay.strip() else None
             # The record read is small; keeping it on this loop lets the action's
             # follow-up task be created here, with the Manager call in a thread.
-            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason)
+            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason, action_id=action_id)
             return http_json_response({"state": "pending", "op": op.overview()}, status=202)
         return http_error(404, "No such office route")
 

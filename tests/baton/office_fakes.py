@@ -34,18 +34,35 @@ class FakeCore:
             raise CoreNotBuiltError(self.unavailable)
         return list(self.agents_by_handle.values())
 
-    def act(self, handle: str, action: str, reason: str) -> str:
+    def act(self, handle: str, action: str, reason: str, *,
+            actor: str = "", action_id: str | None = None) -> str:
         del reason
+        if not actor:
+            raise ValueError(f"refused: no actor for {action} on {handle}")
+        if action_id and action_id in self.actions:
+            existing = self.actions[action_id]
+            if existing.handle != handle or existing.action != action:
+                raise ValueError(f"refused: replay id {action_id} is taken by another action")
+            return action_id
         if self.unavailable:
             from babo.office.api import CoreNotBuiltError
 
             raise CoreNotBuiltError(self.unavailable)
         if handle not in self.agents_by_handle:
-            raise ValueError(f"refused: unknown handle {handle}")
+            # Refusal is a state the core reports, not an exception: nothing ran.
+            self._next += 1
+            refused_id = f"act-{self._next}"
+            self.actions[refused_id] = ActionRecord(
+                id=refused_id, handle=handle, action=action, state="refused",
+                said=f"no agent called {handle} is recorded here; record it first")
+            return refused_id
+        if action_id:
+            self.actions[action_id] = ActionRecord(id=action_id, handle=handle, action=action)
+            return action_id
         self._next += 1
-        action_id = f"act-{self._next}"
-        self.actions[action_id] = ActionRecord(id=action_id, handle=handle, action=action)
-        return action_id
+        new_id = f"act-{self._next}"
+        self.actions[new_id] = ActionRecord(id=new_id, handle=handle, action=action)
+        return new_id
 
     def action(self, action_id: str) -> ActionRecord:
         record = self.actions.get(action_id)

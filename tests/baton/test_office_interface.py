@@ -17,6 +17,17 @@ def _params(method: str) -> set[str]:
     return {name for name in signature.parameters if name != "self"}
 
 
+def test_act_names_the_actor_and_the_replay_key_as_keyword_only() -> None:
+    """R5 needs the actor at the boundary; R6 needs a replay key. Both must be
+    named here, or the gate exists only inside the core and the surface hides it."""
+    import inspect as _inspect
+
+    signature = _inspect.signature(api.OfficeManager.act)
+    assert "actor" in signature.parameters and "action_id" in signature.parameters
+    for name in ("actor", "action_id"):
+        assert signature.parameters[name].kind is _inspect.Parameter.KEYWORD_ONLY
+
+
 def test_the_interface_offers_only_the_four_operations() -> None:
     assert {m for m in dir(api.OfficeManager) if not m.startswith("_")} >= {"health", "agents", "act", "action"}
 
@@ -24,6 +35,8 @@ def test_the_interface_offers_only_the_four_operations() -> None:
 def test_no_runtime_handle_or_capability_argument_crosses_the_interface() -> None:
     forbidden = {"socket", "socket_path", "podman", "container", "container_id", "pod", "pod_id",
                  "netns", "capability", "capabilities", "key", "secret", "token", "revoke_handle"}
+    # `actor` and `action_id` are names/keys, not runtime handles: actor is who
+    # asks, action_id is the caller's replay key.
     for method in ("health", "agents", "act", "action"):
         assert not (_params(method) & forbidden), f"{method} takes a runtime handle or a secret"
 
@@ -47,3 +60,34 @@ def test_credential_rows_are_identity_only() -> None:
 
     row = Checkout(id="c1", scope="kimi", issued_at="t0", expires_at="t1", unrevocable=True).overview()
     assert set(row) == {"id", "scope", "issued_at", "expires_at", "unrevocable"}
+
+
+def test_no_method_hides_a_runtime_handle_inside_kwargs() -> None:
+    """A **kwargs bag would let a socket path travel without ever being named."""
+    for method in ("health", "agents", "act", "action"):
+        kinds = {p.kind for p in inspect.signature(getattr(api.OfficeManager, method)).parameters.values()}
+        assert inspect.Parameter.VAR_KEYWORD not in kinds, f"{method} takes **kwargs"
+        assert inspect.Parameter.VAR_POSITIONAL not in kinds, f"{method} takes *args"
+
+
+def test_a_core_that_imports_but_breaks_is_not_reported_as_unbuilt(monkeypatch) -> None:
+    """A broken core must not look like an absent one (R-4 on the review)."""
+    import sys
+    import types
+
+    broken = types.ModuleType("babo.office.core")
+    executed = {"ran": False}
+
+    def _explode(_cfg: object = None):
+        executed["ran"] = True
+        raise RuntimeError("a dependency broke while the core imported")
+
+    broken.manager_for = _explode  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "babo.office.core", broken)
+    try:
+        api.manager_for(None)
+    except RuntimeError as exc:
+        assert "dependency broke" in str(exc)
+        assert executed["ran"] is True
+    else:  # pragma: no cover
+        raise AssertionError("a broken core must not be reported as unbuilt")

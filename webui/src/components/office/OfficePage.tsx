@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, PauseCircle, PlayCircle } from "lucide-react";
+import { Hammer, Loader2, PauseCircle, PlayCircle, RotateCcw, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
-import { officeAgentAction, fetchOffice, fetchOfficeOp, type OfficeAgent, type OfficeOp, type OfficeView } from "@/lib/api";
+import { officeAgentAction, fetchOffice, fetchOfficeOp, type OfficeAgent, type OfficeOp, type OfficeView, type OfficeVerb } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STATE_TONE: Record<string, string> = {
@@ -45,11 +45,11 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
     return () => { alive.current = false; window.clearInterval(timer); };
   }, [load]);
 
-  const act = useCallback(async (handle: string, verb: "wake" | "freeze") => {
+  const act = useCallback(async (handle: string, verb: OfficeVerb) => {
     setBusy(handle);
     setResult({ handle, text: t("office.pending", { defaultValue: "Asking the Manager…" }), state: "pending" });
     try {
-      const started = await officeAgentAction(client, handle, verb, verb === "wake" ? "owner: wake from the office" : "owner: freeze from the office");
+      const started = await officeAgentAction(client, handle, verb, `owner: ${verb} from the office`);
       let op: OfficeOp = started.op;
       while (alive.current && (op.state === "pending" || op.state === "running")) {
         await new Promise((resolve) => window.setTimeout(resolve, 700));
@@ -120,6 +120,11 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
               {agent?.wg_address && <span className="font-mono text-[11px] text-muted-foreground">{agent.wg_address}</span>}
               {agent?.checkouts.length ? <span className="text-[11px] text-muted-foreground">{t("office.checkouts", { defaultValue: "{{n}} live checkout(s)", n: agent.checkouts.length })}</span> : null}
               <span className="ml-auto flex gap-2">
+                <Button size="sm" variant="outline" disabled={busy === handle || status !== "missing"}
+                  title={t("office.spawnHint", { defaultValue: "Bring this agent up for the first time" })}
+                  onClick={() => void act(handle, "spawn")}>
+                  <Hammer className="mr-1 h-4 w-4" />{t("office.spawn", { defaultValue: "Spawn" })}
+                </Button>
                 <Button size="sm" variant="outline" disabled={busy === handle || !canWake}
                   onClick={() => void act(handle, "wake")}>
                   <PlayCircle className="mr-1 h-4 w-4" />{t("office.wake", { defaultValue: "Wake" })}
@@ -127,6 +132,22 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
                 <Button size="sm" variant="outline" disabled={busy === handle || status !== "running"}
                   onClick={() => void act(handle, "freeze")}>
                   <PauseCircle className="mr-1 h-4 w-4" />{t("office.freeze", { defaultValue: "Freeze" })}
+                </Button>
+                <Button size="sm" variant="outline" disabled={busy === handle || status === "missing"}
+                  title={t("office.rescueHint", { defaultValue: "Keep the work, replace the pod and its credentials" })}
+                  onClick={() => void act(handle, "rescue")}>
+                  <RotateCcw className="mr-1 h-4 w-4" />{t("office.rescue", { defaultValue: "Rescue" })}
+                </Button>
+                <Button size="sm" variant="outline" disabled={busy === handle || status === "missing"}
+                  title={t("office.destroyHint", { defaultValue: "Tear it down and revoke what it holds; the work is not preserved" })}
+                  onClick={() => {
+                    const ok = window.confirm(t("office.destroyConfirm", {
+                      defaultValue: "Destroy {{handle}}? Its pod is torn down and its credentials are revoked. Work is not preserved.",
+                      handle,
+                    }));
+                    if (ok) void act(handle, "destroy");
+                  }}>
+                  <Wrench className="mr-1 h-4 w-4" />{t("office.destroy", { defaultValue: "Destroy" })}
                 </Button>
               </span>
               {agent?.said && <p className="w-full text-[12px] text-muted-foreground">{agent.said}</p>}
@@ -140,7 +161,7 @@ export function OfficePage({ onBackToChat }: { onBackToChat: () => void }) {
         <span className="font-mono">{result.handle}</span>: {result.text}
       </p>}
       <p className="text-[12px] text-muted-foreground">
-        {t("office.freezeNote", { defaultValue: "Freeze asks the agent to finish its turn and save its work, then releases the pod. Wake resumes that work in a fresh pod with new credentials. Nothing is lost; the process does not continue." })}
+        {t("office.verbsNote", { defaultValue: "Wake and Freeze keep the work; Rescue replaces the pod and its credentials around the kept work; Destroy revokes and discards it. Every verdict shown here is the manager core's own words." })}
       </p>
       {view.listener && <p className="font-mono text-[11px] text-muted-foreground">
         {t("office.listener", { defaultValue: "This interface is bound to {{listener}} — shown as a fact; the network rule that refuses other sources is the wall. That rule identifies the host, not the person: anyone on the host's WireGuard address is you, as far as this page can tell.", listener: view.listener })}

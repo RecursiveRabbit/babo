@@ -133,11 +133,14 @@ async def test_a_failed_action_says_why_and_leaves_the_record_alone(town: Town, 
     assert agent["desired"] == "frozen" and agent["status"] == "frozen"
 
 
-async def test_an_unrecorded_agent_cannot_be_driven_from_the_page(town: Town, index_path: Path,
-                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page(town: Town, index_path: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """One refusal, one place: the page asks, the core declines by name (L-02/L-03)."""
     routes = _routes(town, index_path, monkeypatch)
-    status, body = await _call(routes, "/api/office/agents/wake", {"handle": "ghost"})
-    assert status == 400 and "isn't recorded" in body
+    status, started = await _call(routes, "/api/office/agents/wake", {"handle": "ghost"})
+    assert status == 202
+    op = await _settle(routes, started["op"]["id"])
+    assert op["state"] == "refused" and "record it first" in op["said"]
 
 
 async def test_an_unreachable_manager_is_shown_as_unknown_not_running(town: Town, index_path: Path,
@@ -205,3 +208,18 @@ async def test_before_the_core_lands_the_office_says_so(town: Town, index_path: 
     agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
     assert agent["status"] == "unknown" and agent["desired"] == "running"
     assert agent["said"] == view["manager"]["said"]
+
+
+async def test_the_other_three_verbs_are_reachable_and_report_the_cores_word(town: Town, index_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """spawn/rescue/destroy ride the same pending→verdict path; no friendlier synonyms."""
+    slug = _project(town)
+    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")})
+    routes = _routes(town, index_path, monkeypatch, manager=manager)
+    await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
+    for verb in ("spawn", "rescue", "destroy"):
+        status, started = await _call(routes, f"/api/office/agents/{verb}", {"handle": "crew-1"})
+        assert status == 202, verb
+        op = await _settle(routes, started["op"]["id"])
+        assert op["state"] == "refused", verb
+        assert verb in op["said"]

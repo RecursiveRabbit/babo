@@ -21,13 +21,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from babo.baton import projects as project_board
-from babo.baton.town import BatonError, Town
+from babo.baton.town import OWNER, BatonError, Town
 from babo.office import model
 from babo.office.api import ActionRecord, CoreNotBuiltError, OfficeManager
 from babo.office.store import AgentStore, CrewStore
 
-# The UI's two verbs, resolved to the Manager's actions.
-ACTIONS = {"wake": "wake", "freeze": "freeze"}
+# What the page and CLI may ask for, straight from the interface's vocabulary.
+ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy")
 TERMINAL = ("succeeded", "failed", "refused", "timeout")
 
 
@@ -151,12 +151,28 @@ def record_agent(town: Town, change: dict[str, Any]) -> dict[str, object]:
     return {"message": said, "agent": AgentStore(town).get(handle)}
 
 
-def _require_recorded(store: AgentStore, handle: str) -> dict[str, Any]:
-    entry = store.get(handle)
-    if entry is None:
-        raise BatonError(f"'{handle}' isn't recorded here, so it can't be woken or frozen from this page. "
-                         "Record it first.")
-    return entry
+def _settle(core: OfficeManager, op: Op, store: AgentStore, record: ActionRecord) -> None:
+    """The one place an outcome becomes product state, for both doors.
+
+    The page's follow-up and the CLI's wait come through here, so a success
+    moves the desired record the same way whichever asked for it — otherwise a
+    CLI wake leaves the pair rendering as `drifted`, a product bug wearing an
+    operator's hat.
+    """
+    op.state, op.said = record.state, record.said
+    if record.state != "succeeded":
+        return
+    try:
+        observed = core.agents()
+    except CoreNotBuiltError:
+        observed = []
+    seen = next((a for a in observed if a.handle == op.handle), None)
+    op.observed = seen.overview() if seen else None
+    # Only after the core says it happened does the configuration follow.
+    try:
+        store.set_desired(op.handle, "running" if op.action == "wake" else "frozen")
+    except BatonError:
+        pass
 
 
 async def _poll(core: OfficeManager, op: Op, timeout_s: float, store: AgentStore) -> None:
@@ -166,26 +182,13 @@ async def _poll(core: OfficeManager, op: Op, timeout_s: float, store: AgentStore
         try:
             row = await asyncio.to_thread(core.action, op.id)
         except CoreNotBuiltError as exc:
-            op.state, op.said = "failed", str(exc)
+            # Gate off is a refusal, not a failure: nothing ran, and the core says why.
+            op.state, op.said = "refused", str(exc)
             return
-        state = row.state
-        op.said = row.said
-        if state in TERMINAL:
-            op.state = state
-            if state == "succeeded":
-                try:
-                    observed = await asyncio.to_thread(core.agents)
-                except CoreNotBuiltError:
-                    observed = []
-                seen = next((a for a in observed if a.handle == op.handle), None)
-                op.observed = seen.overview() if seen else None
-                # Only after the core says it happened does the configuration follow.
-                try:
-                    store.set_desired(op.handle, "running" if op.action == "wake" else "frozen")
-                except BatonError:
-                    pass
+        if row.state in TERMINAL:
+            _settle(core, op, store, row)
             return
-        op.state = "running" if state == "running" else "pending"
+        op.state = "running" if row.state == "running" else "pending"
         if waited >= timeout_s:
             op.state, op.said = "timeout", f"no verdict from the manager core after {timeout_s:g}s"
             return
@@ -197,27 +200,33 @@ POLL_S = 0.5
 
 
 def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
-                 timeout_s: float = 120.0) -> Op:
-    """The terminal's path: ask, then wait for the Manager's verdict (no event loop).
+                 timeout_s: float = 120.0, actor: str = OWNER, store: AgentStore | None = None) -> Op:
+    """The terminal's path: ask, then wait for the core's verdict (no event loop).
 
-    The same words the page shows — pending never becomes success by itself.
+    The same words the page shows — pending never becomes success by itself —
+    and the same settle helper, so a CLI success moves the desired record too.
     """
     import time
 
     if verb not in ACTIONS:
-        raise BatonError(f"there's no '{verb}' action; it's wake or freeze")
-    action_id = core.act(handle, ACTIONS[verb], reason)
+        raise BatonError(f"there's no '{verb}' action; it is one of: {', '.join(ACTIONS)}")
+    try:
+        action_id = core.act(handle, verb, reason, actor=actor)
+    except CoreNotBuiltError as exc:
+        raise BatonError(str(exc)) from exc
     op = Op(id=action_id, handle=handle, action=verb)
     waited = 0.0
     while True:
-        row: ActionRecord = core.action(action_id)
-        op.said = row.said
-        state = row.state
-        if state in TERMINAL:
-            op.state = state
-            if state == "succeeded":
-                seen = next((a for a in core.agents() if a.handle == handle), None)
-                op.observed = seen.overview() if seen else None
+        try:
+            row: ActionRecord = core.action(action_id)
+        except CoreNotBuiltError as exc:
+            op.state, op.said = "refused", str(exc)
+            return op
+        if row.state in TERMINAL:
+            if store is not None:
+                _settle(core, op, store, row)
+            else:
+                op.state, op.said = row.state, row.said
             return op
         if waited >= timeout_s:
             op.state, op.said = "timeout", f"no verdict from the manager core after {timeout_s:g}s"
@@ -226,17 +235,19 @@ def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
         waited += POLL_S
 
 
-def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, reason: str = "") -> Op:
-    """Ask the Manager for one action and start following it. Pending until it answers."""
+def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, reason: str = "",
+          actor: str = OWNER, action_id: str | None = None) -> Op:
+    """Ask the core for one action and start following it. Pending until it answers."""
     if verb not in ACTIONS:
-        raise BatonError(f"there's no '{verb}' action; it's wake or freeze")
+        raise BatonError(f"there's no '{verb}' action; it is one of: {', '.join(ACTIONS)}")
     store = AgentStore(town)
-    _require_recorded(store, handle)
+    # No local "is it recorded?" gate: that precondition is the core's (L-03) and
+    # it refuses by name, so both doors get one refusal instead of two behaviours.
     try:
-        action_id = core.act(handle, ACTIONS[verb], reason)
+        core_id = core.act(handle, verb, reason, actor=actor, action_id=action_id)
     except CoreNotBuiltError as exc:
         raise BatonError(str(exc)) from exc
-    op = ops.add(action_id, handle, verb)
+    op = ops.add(core_id, handle, verb)
     asyncio.create_task(_poll(core, op, timeout_s=120.0, store=store))
     return op
 

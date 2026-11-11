@@ -2102,7 +2102,9 @@ export function fetchOfficeOp(token: string, id: string, base: string = ""): Pro
 }
 
 /** Wake a frozen agent, or freeze a running one — the Manager's own verbs. */
-export function officeAgentAction(transport: WebUIMutationTransport, handle: string, verb: "wake" | "freeze",
+export type OfficeVerb = "spawn" | "wake" | "freeze" | "rescue" | "destroy";
+
+export function officeAgentAction(transport: WebUIMutationTransport, handle: string, verb: OfficeVerb,
   reason = ""): Promise<{ state: string; op: OfficeOp }> {
   return mutation<{ state: string; op: OfficeOp }>(transport, `office.agent.${verb}`, { handle, reason });
 }

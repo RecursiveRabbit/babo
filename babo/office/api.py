@@ -49,13 +49,22 @@ class CoreNotBuiltError(Exception):
 
 @dataclass(frozen=True)
 class ActionRecord:
-    """One action as the core records it: what happened, in its own words."""
+    """One action as the core records it: what happened, in its own words.
+
+    The state is closed: ``pending``, ``running``, or one of the four terminal
+    values. A core that invents a fifth word fails here, at construction, rather
+    than reaching the page as a status nobody can render.
+    """
 
     id: str
     handle: str
     action: str
     state: str = "pending"
     said: str = ""
+
+    def __post_init__(self) -> None:
+        if self.state not in ("pending", "running", *TERMINAL):
+            raise ValueError(f"an action's state is pending, running or one of {TERMINAL}; got {self.state!r}")
 
     @property
     def terminal(self) -> bool:
@@ -76,8 +85,21 @@ class OfficeManager(Protocol):
         """Every agent the core knows, as the runtime reports it."""
         ...
 
-    def act(self, handle: str, action: str, reason: str) -> str:
-        """Ask for one lifecycle action; returns the core's action id."""
+    def act(self, handle: str, action: str, reason: str, *,
+            actor: str = "", action_id: str | None = None) -> str:
+        """Ask for one lifecycle action; returns the core's action id.
+
+        ``actor`` is who is asking. The core refuses by name when it is absent —
+        an action with no actor never takes effect, and the refusal says so
+        rather than inventing a default. The product supplies it server-side
+        (the owner, from the authenticated surface); it is never taken from a
+        request body, because a client that names itself is not evidence.
+
+        ``action_id`` is the caller's replay key. Replaying the same id returns
+        the same action and does nothing; a different handle or verb under a
+        taken id is refused. Without it there is nothing at the boundary for a
+        replay rule to be explicit about.
+        """
         ...
 
     def action(self, action_id: str) -> ActionRecord:
@@ -99,8 +121,15 @@ def manager_for(_cfg: object = None) -> OfficeManager:
     """
     try:
         from babo.office.core import manager_for as build  # the manager slice's entry point
-    except ImportError as exc:  # the slice hasn't landed yet
-        raise CoreNotBuiltError(
-            "the native manager core hasn't landed yet; the office is read-only until it does"
-        ) from exc
+    except ModuleNotFoundError as exc:
+        # Only the module's absence means "not built". A core that exists but
+        # fails to import (missing dependency, renamed symbol) is *broken*, and a
+        # broken core must never be reported to the operator as unbuilt — the
+        # page would say "hasn't landed yet" while the truth is "it landed and
+        # it does not work", which is the failure this check exists to prevent.
+        if exc.name == "babo.office.core":
+            raise CoreNotBuiltError(
+                "the native manager core hasn't landed yet; the office is read-only until it does"
+            ) from exc
+        raise
     return build(_cfg)
