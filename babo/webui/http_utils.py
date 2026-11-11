@@ -306,12 +306,18 @@ def is_local_browser_request(connection: Any, headers: Any) -> bool:
 
 def peer_host(connection: Any) -> str:
     """The socket peer's address, normalized (IPv4-mapped IPv6 unwrapped). Never a header."""
-    addr = getattr(connection, "remote_address", None)
-    if not addr:
+    addr: object = getattr(connection, "remote_address", None)
+    candidate: object
+    if isinstance(addr, tuple):
+        parts = cast(tuple[object, ...], addr)
+        candidate = parts[0] if parts else ""
+    elif isinstance(addr, str):
+        candidate = addr
+    else:
         return ""
-    host = addr[0] if isinstance(addr, tuple) else addr
-    if not isinstance(host, str):
+    if not isinstance(candidate, str):
         return ""
+    host: str = candidate
     return host[7:] if host.startswith("::ffff:") else host
 
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from websockets.http11 import Request as WsRequest
@@ -88,23 +88,30 @@ def _listener() -> str:
     try:
         from babo.config.loader import load_config
 
-        channel = load_config().channels.websocket
-        config = channel if isinstance(channel, dict) else {}
-        host = str(config.get("host") or "127.0.0.1")
-        port = int(config.get("port") or 8765)
+        channels = load_config().channels
+        channel = cast(dict[str, Any], getattr(channels, "websocket", None) or {})
+        host = str(channel.get("host") or "127.0.0.1")
+        port = int(channel.get("port") or 8765)
         return f"{host}:{port}"
     except Exception:  # pragma: no cover - a read-only convenience line
         return ""
 
 
+_ops_holder: list[Any] = []  # one slot: the gateway's record of actions in flight
+
+
 def _ops() -> Any:
-    """The gateway's one in-memory record of actions in flight."""
-    global _OPS
-    if _OPS is None:
+    """The gateway's one in-memory record of actions in flight.
+
+    A one-slot holder rather than a module global: a global would be a constant
+    reassigned at runtime, which is exactly the shape a type checker (and the
+    next reader) is right to distrust.
+    """
+    if not _ops_holder:
         from babo.office.control import Ops
 
-        _OPS = Ops()
-    return _OPS
+        _ops_holder.append(Ops())
+    return _ops_holder[0]
 
 
 def _text(payload: dict[str, Any], key: str, limit: int = 200) -> str:

@@ -32,7 +32,7 @@ Rules the implementation owes this interface (not restated anywhere else):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from babo.office.model import AgentObserved
 
@@ -123,8 +123,13 @@ def manager_for(_cfg: object = None) -> OfficeManager:
     container id and no capability argument anywhere below — the UI cannot be
     handed a way to reach the runtime, even by mistake.
     """
+    import importlib
+
     try:
-        from babo.office.core import manager_for as build  # the manager slice's entry point
+        # Imported by name, not by a static `from … import`: the module may not
+        # exist on this head, and a static import would be both a type-check
+        # failure and a lie about the dependency.
+        core = importlib.import_module("babo.office.core")
     except ModuleNotFoundError as exc:
         # Only the module's absence means "not built". A core that exists but
         # fails to import (missing dependency, renamed symbol) is *broken*, and a
@@ -136,4 +141,5 @@ def manager_for(_cfg: object = None) -> OfficeManager:
                 "the native manager core hasn't landed yet; the office is read-only until it does"
             ) from exc
         raise
-    return build(_cfg)
+    built = core.manager_for(_cfg)
+    return cast(OfficeManager, built)

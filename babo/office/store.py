@@ -73,8 +73,8 @@ class AgentStore:
         handle = _handle(entry.get("handle"))
         with self._lock:
             agents = self.load()
-            raw_previous = agents.get(handle)
-            previous: dict[str, Any] = raw_previous if isinstance(raw_previous, dict) else {}
+            raw_previous: object = agents.get(handle)
+            previous: dict[str, Any] = cast(dict[str, Any], raw_previous) if isinstance(raw_previous, dict) else {}
             saved = {
                 "handle": handle,
                 "resident": str(entry.get("resident") or previous.get("resident") or ""),
@@ -142,7 +142,7 @@ class CrewStore:
             return {"project": project, "lead": "", "crew": [], "exists": False}
         meta, _body = split_frontmatter(text)
         lead = str(meta.get("lead") or "")
-        raw = meta.get("crew") or []
+        raw: object = meta.get("crew") or []
         crew = [str(m) for m in cast(list[object], raw)] if isinstance(raw, list) else []
         return {"project": project, "lead": lead, "crew": crew, "exists": True}
 
@@ -152,7 +152,7 @@ class CrewStore:
         if project_board.load(self.town, project) is None:
             raise BatonError(f"there's no project '{project}' to give a crew")
         lead = _handle(change.get("lead")) if str(change.get("lead") or "").strip() else ""
-        raw_crew = change.get("crew") or []
+        raw_crew: object = change.get("crew") or []
         if not isinstance(raw_crew, list):
             raise BatonError("crew must be a list of agent handles")
         crew = [_handle(m) for m in cast(list[object], raw_crew)]

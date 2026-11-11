@@ -16,6 +16,7 @@ from babo.baton.town import BatonError, Town, now_iso
 if TYPE_CHECKING:
     from babo.baton.requests import SessionRequest
     from babo.config.schema import Config
+    from babo.office.api import OfficeManager
 
 app = typer.Typer(help="The Baton town: residents, memory, upkeep, review.", no_args_is_help=True)
 console = Console()
@@ -1701,7 +1702,7 @@ office_app = typer.Typer(help="The office: projects with one lead and a crew, an
 app.add_typer(office_app, name="office")
 
 
-def _office_core(_cfg: Config) -> object:
+def _office_core(_cfg: Config) -> OfficeManager:
     """The native manager core (babo/office/core.py). Until it lands, the CLI says so."""
     from babo.office.api import manager_for
 
@@ -1844,7 +1845,7 @@ def _webui_base(cfg: Config) -> str:
     `babo ui revoke-sessions` POST at a health endpoint and fail confusingly —
     in a pod, where the two ports differ (8843 UI, 18790 health), always.
     """
-    channel = cfg.channels.websocket if isinstance(cfg.channels.websocket, dict) else {}
+    channel = cast(dict[str, Any], getattr(cfg.channels, "websocket", None) or {})
     host = str(channel.get("host") or "127.0.0.1")
     port = int(channel.get("port") or 8765)
     if host in {"0.0.0.0", "::"}:
