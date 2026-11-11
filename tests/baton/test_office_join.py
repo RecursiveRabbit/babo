@@ -77,3 +77,21 @@ def test_a_graceful_stand_down_is_frozen_and_says_why() -> None:
                                                             "ended_reason": "idle",
                                                             "note": "stood down (idle); work preserved"}))
     assert live.status == model.FROZEN and live.ended_reason == "idle"
+
+
+def test_a_frozen_row_repeats_the_cores_own_reason_verbatim() -> None:
+    """A stand-down the core initiated must not read as a session that ended by
+    itself: the reason is shown as the core wrote it, not mapped to a nicer word."""
+    live = model.join(_desired(desired="frozen"),
+                      _observed(state="frozen",
+                                provenance={"note": "stood down by the core; work preserved",
+                                            "ended_reason": "standdown"}))
+    assert live.status == model.FROZEN
+    assert live.ended_reason == "standdown"
+    assert live.said == "stood down by the core; work preserved"
+
+
+def test_an_unknown_ended_reason_is_shown_verbatim_not_translated() -> None:
+    live = model.join(_desired(desired="frozen"),
+                      _observed(state="frozen", provenance={"ended_reason": "context_limit"}))
+    assert live.ended_reason == "context_limit"

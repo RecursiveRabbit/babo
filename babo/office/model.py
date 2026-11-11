@@ -176,7 +176,11 @@ def join(desired: AgentDesired | None, observed: AgentObserved | None) -> AgentL
     if observed.state == "starting":
         return AgentLive(status=STARTING, **common)  # type: ignore[arg-type]
     if observed.state == "frozen" and desired.desired == "frozen":
-        return AgentLive(status=FROZEN, **common)  # type: ignore[arg-type]
+        # Repeat the core's own note (why it is frozen, who ended the session).
+        # The page paraphrases nothing here: if the core says a stand-down was
+        # core-initiated, that is what an operator reads.
+        return AgentLive(status=FROZEN, said=str(observed.provenance.get("note") or ""),
+                         **common)  # type: ignore[arg-type]
     if observed.state == "dead":
         # Dead means the pod is gone and the Manager has no graceful stand-down on
         # record (crash, or no ending recorded). That is the whole claim; repeat the
