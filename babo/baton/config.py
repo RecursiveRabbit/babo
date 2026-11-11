@@ -97,18 +97,16 @@ class BatonUpkeepConfig(Base):
 
 
 class BatonOfficeConfig(Base):
-    """The office control plane: how Babo reaches the NeoClaw Manager.
+    """The office: how the product reaches its manager core.
 
-    Babo owns desired state and decides actions; the Manager is the only podman
-    socket holder, Router caller and credential minter. ``backend`` is
-    ``manager`` (default) or ``stub`` (no containers; the page says so).
-    ``manager_url`` overrides ``NEOCLAW_MANAGER_URL``; empty everywhere means
-    the Mesh address ``http://10.0.0.3:9200`` — never a loopback fallback.
+    There is no URL here any more, on purpose: the manager is part of this
+    product (see `babo/office/api.py` for the interface it must satisfy). Any
+    runtime access the core needs is the core's own configuration, not a
+    network address the UI can be pointed at.
     """
 
-    backend: str = "manager"
-    manager_url: str = ""
-    timeout_s: float = Field(default=20.0, gt=0)
+    # Kept for compatibility with existing config files; unused by the product.
+    backend: str = "native"
 
 
 class BatonOpencodeConfig(Base):

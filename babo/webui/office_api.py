@@ -37,14 +37,41 @@ def _town() -> Town:
     return Town.open(load_config().baton.town_path)
 
 
-def _backend() -> Any:
-    from babo.config.loader import load_config
-    from babo.office.backend import from_config
+def _manager() -> Any:
+    """The native manager core. Until it lands, this raises and the page says so."""
+    from babo.office.api import manager_for
 
-    return from_config(load_config().baton)
+    return manager_for(None)
 
 
 _OPS: Any = None
+
+
+def _unbuilt(said: str, listener: str) -> dict[str, Any]:
+    """What the office looks like before its manager exists: honest, not empty.
+
+    Desired records and crews are still the owner's, so they are listed; every
+    agent is `unknown` because nothing can observe it yet, and the banner names
+    the reason. No stub, no second core, no pretending.
+    """
+    from babo.baton import projects as project_board
+    from babo.office.store import AgentStore, CrewStore
+
+    town = _town()
+    agents = AgentStore(town).all()
+    return {
+        "projects": [{"slug": p.slug, "title": p.title, "lead": CrewStore(town).read(p.slug).get("lead", ""),
+                      "crew": CrewStore(town).read(p.slug).get("crew", []), "agents": []}
+                     for p in project_board.all_projects(town)],
+        "agents": [{"handle": handle, "resident": str(entry.get("resident") or ""), "project": str(entry.get("project") or ""),
+                    "crew": str(entry.get("crew") or ""), "role": "", "status": "unknown",
+                    "desired": str(entry.get("desired") or ""), "observed": None, "wg_address": "",
+                    "last_activity_at": "", "checkouts": [], "ended_reason": "", "said": said}
+                   for handle, entry in sorted(agents.items())],
+        "missing": [], "drifted": [], "unmanaged": [],
+        "manager": {"name": "native", "available": False, "said": said},
+        "listener": listener, "desired": {h: dict(e) for h, e in agents.items()},
+    }
 
 
 def _listener() -> str:
@@ -116,8 +143,14 @@ class OfficeRoutes:
         from babo.office import control
 
         if got == "/api/office":
+            from babo.office.api import CoreNotBuiltError
+
             listener = _listener()
-            return http_json_response(await asyncio.to_thread(control.office_view, _town(), _backend(), listener))
+            try:
+                core = _manager()
+            except CoreNotBuiltError as exc:
+                return http_json_response(_unbuilt(str(exc), listener))
+            return http_json_response(await asyncio.to_thread(control.office_view, _town(), core, listener))
         if got.startswith("/api/office/ops/"):
             return http_json_response(await asyncio.to_thread(control.op_view, _ops(), got.rsplit("/", 1)[-1]))
         if got == OFFICE_MUTATION_PATHS["office.crew"]:
@@ -131,7 +164,7 @@ class OfficeRoutes:
             reason = str(body.get("reason") or "")[:400]
             # The record read is small; keeping it on this loop lets the action's
             # follow-up task be created here, with the Manager call in a thread.
-            op = control.begin(_town(), _backend(), _ops(), handle, verb, reason)
+            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason)
             return http_json_response({"state": "pending", "op": op.overview()}, status=202)
         return http_error(404, "No such office route")
 

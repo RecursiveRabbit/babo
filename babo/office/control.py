@@ -23,7 +23,7 @@ from typing import Any, cast
 from babo.baton import projects as project_board
 from babo.baton.town import BatonError, Town
 from babo.office import model
-from babo.office.backend import ManagerProtocol, ManagerUnreachableError
+from babo.office.api import ActionRecord, CoreNotBuiltError, OfficeManager
 from babo.office.store import AgentStore, CrewStore
 
 # The UI's two verbs, resolved to the Manager's actions.
@@ -62,7 +62,7 @@ class Ops:
         return op
 
 
-def office_view(town: Town, backend: ManagerProtocol, listener: str = "") -> dict[str, object]:
+def office_view(town: Town, core: OfficeManager, listener: str = "") -> dict[str, object]:
     """Projects with their crews, plus every managed agent joined to the Manager's answer.
 
     If the Manager can't be read, the page is told exactly that — the desired
@@ -73,10 +73,10 @@ def office_view(town: Town, backend: ManagerProtocol, listener: str = "") -> dic
     desired = store.all()
 
     try:
-        observed_list = backend.state()
-        reachable, detail = backend.reachable()
+        observed_list = core.agents()
+        reachable, detail = core.health()
         unavailable = "" if reachable else detail
-    except ManagerUnreachableError as exc:
+    except CoreNotBuiltError as exc:
         observed_list = []
         unavailable = str(exc)
     observed = {seen.handle: seen for seen in observed_list}
@@ -131,7 +131,7 @@ def office_view(town: Town, backend: ManagerProtocol, listener: str = "") -> dic
         "missing": [a.handle for a in live if a.status == model.MISSING],
         "drifted": [a.handle for a in live if a.status == model.DRIFTED],
         "unmanaged": [a.handle for a in live if a.status == model.UNMANAGED],
-        "manager": {"name": getattr(backend, "name", "unknown"), "available": not unavailable, "said": unavailable},
+        "manager": {"name": getattr(core, "name", "unknown"), "available": not unavailable, "said": unavailable},
         # Corroboration only: the Router's source rule is the wall; a bind address is a fact,
         # not an authentication check.
         "listener": listener,
@@ -159,27 +159,27 @@ def _require_recorded(store: AgentStore, handle: str) -> dict[str, Any]:
     return entry
 
 
-async def _poll(backend: ManagerProtocol, op: Op, timeout_s: float, store: AgentStore) -> None:
-    """Follow the Manager's action record until it settles, in its own words."""
+async def _poll(core: OfficeManager, op: Op, timeout_s: float, store: AgentStore) -> None:
+    """Follow the core's action record until it settles, in its own words."""
     waited = 0.0
     while True:
         try:
-            row = await asyncio.to_thread(backend.action_status, op.id)
-        except ManagerUnreachableError as exc:
+            row = await asyncio.to_thread(core.action, op.id)
+        except CoreNotBuiltError as exc:
             op.state, op.said = "failed", str(exc)
             return
-        state = str(row.get("state") or "unknown")
-        op.said = str(row.get("detail") or "")
+        state = row.state
+        op.said = row.said
         if state in TERMINAL:
             op.state = state
             if state == "succeeded":
                 try:
-                    observed = await asyncio.to_thread(backend.state)
-                except ManagerUnreachableError:
+                    observed = await asyncio.to_thread(core.agents)
+                except CoreNotBuiltError:
                     observed = []
                 seen = next((a for a in observed if a.handle == op.handle), None)
                 op.observed = seen.overview() if seen else None
-                # Only after the Manager says it happened does the configuration follow.
+                # Only after the core says it happened does the configuration follow.
                 try:
                     store.set_desired(op.handle, "running" if op.action == "wake" else "frozen")
                 except BatonError:
@@ -187,7 +187,7 @@ async def _poll(backend: ManagerProtocol, op: Op, timeout_s: float, store: Agent
             return
         op.state = "running" if state == "running" else "pending"
         if waited >= timeout_s:
-            op.state, op.said = "timeout", f"no verdict from the Manager after {timeout_s:g}s"
+            op.state, op.said = "timeout", f"no verdict from the manager core after {timeout_s:g}s"
             return
         await asyncio.sleep(POLL_S)
         waited += POLL_S
@@ -196,7 +196,7 @@ async def _poll(backend: ManagerProtocol, op: Op, timeout_s: float, store: Agent
 POLL_S = 0.5
 
 
-def perform_sync(backend: ManagerProtocol, handle: str, verb: str, reason: str = "",
+def perform_sync(core: OfficeManager, handle: str, verb: str, reason: str = "",
                  timeout_s: float = 120.0) -> Op:
     """The terminal's path: ask, then wait for the Manager's verdict (no event loop).
 
@@ -206,38 +206,38 @@ def perform_sync(backend: ManagerProtocol, handle: str, verb: str, reason: str =
 
     if verb not in ACTIONS:
         raise BatonError(f"there's no '{verb}' action; it's wake or freeze")
-    action_id = backend.act(handle, ACTIONS[verb], reason)
+    action_id = core.act(handle, ACTIONS[verb], reason)
     op = Op(id=action_id, handle=handle, action=verb)
     waited = 0.0
     while True:
-        row = backend.action_status(action_id)
-        op.said = str(row.get("detail") or "")
-        state = str(row.get("state") or "unknown")
+        row: ActionRecord = core.action(action_id)
+        op.said = row.said
+        state = row.state
         if state in TERMINAL:
             op.state = state
             if state == "succeeded":
-                seen = next((a for a in backend.state() if a.handle == handle), None)
+                seen = next((a for a in core.agents() if a.handle == handle), None)
                 op.observed = seen.overview() if seen else None
             return op
         if waited >= timeout_s:
-            op.state, op.said = "timeout", f"no verdict from the Manager after {timeout_s:g}s"
+            op.state, op.said = "timeout", f"no verdict from the manager core after {timeout_s:g}s"
             return op
         time.sleep(POLL_S)
         waited += POLL_S
 
 
-def begin(town: Town, backend: ManagerProtocol, ops: Ops, handle: str, verb: str, reason: str = "") -> Op:
+def begin(town: Town, core: OfficeManager, ops: Ops, handle: str, verb: str, reason: str = "") -> Op:
     """Ask the Manager for one action and start following it. Pending until it answers."""
     if verb not in ACTIONS:
         raise BatonError(f"there's no '{verb}' action; it's wake or freeze")
     store = AgentStore(town)
     _require_recorded(store, handle)
     try:
-        action_id = backend.act(handle, ACTIONS[verb], reason)
-    except ManagerUnreachableError as exc:
+        action_id = core.act(handle, ACTIONS[verb], reason)
+    except CoreNotBuiltError as exc:
         raise BatonError(str(exc)) from exc
     op = ops.add(action_id, handle, verb)
-    asyncio.create_task(_poll(backend, op, timeout_s=120.0, store=store))
+    asyncio.create_task(_poll(core, op, timeout_s=120.0, store=store))
     return op
 
 

@@ -1701,10 +1701,11 @@ office_app = typer.Typer(help="The office: projects with one lead and a crew, an
 app.add_typer(office_app, name="office")
 
 
-def _office_backend(cfg: Config) -> object:
-    from babo.office.backend import from_config
+def _office_core(_cfg: Config) -> object:
+    """The native manager core (babo/office/core.py). Until it lands, the CLI says so."""
+    from babo.office.api import manager_for
 
-    return from_config(cfg.baton)
+    return manager_for(_cfg)
 
 
 @office_app.callback()
@@ -1716,7 +1717,7 @@ def office_board(ctx: typer.Context, config: str | None = _CONFIG_OPT) -> None:
         return
     try:
         t, cfg = _town(config)
-        view = control.office_view(t, _office_backend(cfg))  # type: ignore[arg-type]
+        view = control.office_view(t, _office_core(cfg))  # type: ignore[arg-type]
     except BatonError as exc:
         _fail(exc)
         return
@@ -1743,7 +1744,7 @@ def _office_verb(verb: str, handle: str, reason: str, config: str | None) -> Non
     try:
         t, cfg = _town(config)
         control._require_recorded(control.AgentStore(t), handle)
-        op = control.perform_sync(_office_backend(cfg), handle, verb, reason)  # type: ignore[arg-type]
+        op = control.perform_sync(_office_core(cfg), handle, verb, reason)  # type: ignore[arg-type]
     except BatonError as exc:
         _fail(exc)
         return

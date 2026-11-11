@@ -83,9 +83,13 @@ class Checkout:
     scope: str = ""
     issued_at: str = ""
     expires_at: str = ""
+    unrevocable: bool = False
 
     def overview(self) -> dict[str, object]:
-        return {"id": self.id, "scope": self.scope, "issued_at": self.issued_at, "expires_at": self.expires_at}
+        # Identity only: id, scope, dates, and whether the core says it cannot be
+        # revoked. Never a value, never a revoke handle (R7).
+        return {"id": self.id, "scope": self.scope, "issued_at": self.issued_at,
+                "expires_at": self.expires_at, "unrevocable": self.unrevocable}
 
 
 @dataclass(frozen=True)

@@ -13,21 +13,21 @@ from websockets.http11 import Request as WsRequest
 
 from babo.baton import projects as project_board
 from babo.baton.town import Town
-from babo.office.backend import StubManager
 from babo.office.model import AgentObserved
 from babo.webui import office_api
+from tests.baton.office_fakes import FakeCore
 
 
 def _routes(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, *,
-            manager: StubManager | None = None, authorized: bool = True) -> office_api.OfficeRoutes:
+            manager: FakeCore | None = None, authorized: bool = True) -> office_api.OfficeRoutes:
     from babo.config.schema import Config
 
     cfg = Config.model_validate({"baton": {"town": str(town.root), "indexPath": str(index_path),
                                           "office": {"backend": "stub"}}})
     monkeypatch.setattr("babo.config.loader.load_config", lambda *_a, **_k: cfg)
     monkeypatch.setattr(office_api, "_OPS", None)
-    backend = manager or StubManager()
-    monkeypatch.setattr(office_api, "_backend", lambda: backend)
+    backend = manager or FakeCore()
+    monkeypatch.setattr(office_api, "_manager", lambda: backend)
     payloads: dict[int, dict[str, Any]] = {}
 
     def payload(request: WsRequest) -> dict[str, Any] | None:
@@ -78,7 +78,7 @@ async def test_the_view_joins_records_and_shows_what_is_missing(town: Town, inde
 
     status, view = await _call(routes, "/api/office")
     assert status == 200
-    assert view["manager"] == {"name": "stub", "available": True, "said": ""}
+    assert view["manager"] == {"name": "fake", "available": True, "said": ""}
     agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
     assert agent["status"] == "missing" and agent["desired"] == "running"
     assert view["missing"] == ["crew-1"]
@@ -88,7 +88,7 @@ async def test_the_view_joins_records_and_shows_what_is_missing(town: Town, inde
 async def test_waking_an_agent_is_pending_then_the_managers_answer(town: Town, index_path: Path,
                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
-    manager = StubManager(agents={"crew-1": AgentObserved(handle="crew-1", state="frozen")})
+    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")})
     routes = _routes(town, index_path, monkeypatch, manager=manager)
     await _call(routes, "/api/office/agents/record",
                 {"handle": "crew-1", "resident": "archivist", "project": slug, "desired": "frozen"})
@@ -107,7 +107,7 @@ async def test_waking_an_agent_is_pending_then_the_managers_answer(town: Town, i
 async def test_freezing_says_released_not_paused_and_not_saved(town: Town, index_path: Path,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
-    manager = StubManager(agents={"crew-1": AgentObserved(handle="crew-1", state="alive")})
+    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
     routes = _routes(town, index_path, monkeypatch, manager=manager)
     await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
     _status, started = await _call(routes, "/api/office/agents/freeze", {"handle": "crew-1"})
@@ -121,7 +121,7 @@ async def test_freezing_says_released_not_paused_and_not_saved(town: Town, index
 async def test_a_failed_action_says_why_and_leaves_the_record_alone(town: Town, index_path: Path,
                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
-    manager = StubManager(agents={"crew-1": AgentObserved(handle="crew-1", state="frozen")}, fail={"wake"})
+    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")}, fail={"wake"})
     routes = _routes(town, index_path, monkeypatch, manager=manager)
     await _call(routes, "/api/office/agents/record",
                 {"handle": "crew-1", "resident": "archivist", "project": slug, "desired": "frozen"})
@@ -143,7 +143,7 @@ async def test_an_unrecorded_agent_cannot_be_driven_from_the_page(town: Town, in
 async def test_an_unreachable_manager_is_shown_as_unknown_not_running(town: Town, index_path: Path,
                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
-    manager = StubManager(unavailable="can't reach the Manager at http://10.0.0.3:9200")
+    manager = FakeCore(unavailable="can't reach the Manager at http://10.0.0.3:9200")
     routes = _routes(town, index_path, monkeypatch, manager=manager)
     await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
     status, view = await _call(routes, "/api/office")
@@ -183,3 +183,25 @@ async def test_the_office_view_reports_the_ui_listener_not_the_health_port(town:
     status, view = await _call(routes, "/api/office")
     assert status == 200
     assert view["listener"] == "10.0.0.5:8843", "the UI port, never the health port"
+
+
+async def test_before_the_core_lands_the_office_says_so(town: Town, index_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """No core, no pretending: desired records are listed, agents are `unknown`,
+    and the banner names the reason. A stub here would be a second core."""
+    from babo.office.api import CoreNotBuiltError
+
+    slug = _project(town)
+    routes = _routes(town, index_path, monkeypatch)
+    await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
+
+    def unbuilt(_cfg: object = None) -> object:
+        raise CoreNotBuiltError("the native manager core hasn't landed yet")
+
+    monkeypatch.setattr(office_api, "_manager", unbuilt)
+    status, view = await _call(routes, "/api/office")
+    assert status == 200
+    assert view["manager"]["available"] is False and "hasn't landed" in view["manager"]["said"]
+    agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
+    assert agent["status"] == "unknown" and agent["desired"] == "running"
+    assert agent["said"] == view["manager"]["said"]

@@ -4,17 +4,19 @@ This page is for whoever runs the acceptance proof for the office control
 plane (currently z620). It is a list of commands and what to look for — not a
 claim that any of it has been run.
 
-The slice has two halves and they meet at one interface: Babo owns the office
-(projects, one lead, a crew, and what the owner wants each agent to be), and
-the NeoClaw Manager owns the metal (pods, network, credentials, Router). Babo
-never touches podman; it asks the Manager. If the Manager can't be reached,
+There is one product. Babo owns the office (projects, one lead, a crew, what the
+owner wants each agent to be) **and** the metal (pod lifecycle, network,
+credentials, rescue) through its own manager core. The page and `babo office`
+call `babo/office/api.py`; the core implements it in `babo/office/core.py`.
+Nothing here talks to a second program over HTTP. If the Manager can't be reached,
 the page says so and shows agents as `unknown` — that is the designed
 behaviour, not a failure to hide.
 
 ## What you need before starting
 
-- Babo running where the Manager can reach it and it can reach the Manager's
-  `http://<manager>:9200` (WireGuard), per the packaging step.
+- One Babo pod (the product under test) with its rendered Router. No Rails
+  process, no HTTP manager seam — the NeoClaw model may appear only as an
+  offline oracle in comparison runs, never deployed beside the product.
 - One agent that exists in the Manager, with a handle — call it `<handle>`
   below.
 - One project in Babo's town: `babo projects new "Office proof"` (or the Town
@@ -23,13 +25,10 @@ behaviour, not a failure to hide.
   `baton.office.manager_url` in its config. Leave it unset and Babo uses the
   mesh default `http://10.0.0.3:9200`; it never falls back to a local socket.
 
-## 1. The Manager is read, not guessed
+## 1. The runtime is read, not guessed
 
 ```
-# from the host, as the Manager answers it
-curl -s "$NEOCLAW_MANAGER_URL/api/v1/office/state" | jq '.agents[] | {handle, state}'
-
-# the same facts as Babo sees them
+# the same facts as the page sees them, from the terminal
 babo office
 ```
 

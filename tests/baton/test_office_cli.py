@@ -9,18 +9,18 @@ import pytest
 from babo.baton import cli
 from babo.baton import projects as project_board
 from babo.baton.town import Town
-from babo.office.backend import StubManager
 from babo.office.model import AgentObserved
+from tests.baton.office_fakes import FakeCore
 
 
-def _configure(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, manager: StubManager) -> None:
+def _configure(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, manager: FakeCore) -> None:
     from rich.console import Console
 
     from babo.config.schema import Config
 
     cfg = Config.model_validate({"baton": {"town": str(town.root), "indexPath": str(index_path)}})
     monkeypatch.setattr(cli, "_town", lambda _config: (town, cfg))
-    monkeypatch.setattr(cli, "_office_backend", lambda _cfg: manager)
+    monkeypatch.setattr(cli, "_office_core", lambda _cfg: manager)
     monkeypatch.setattr(cli, "console", Console(width=200, force_terminal=False))
 
 
@@ -29,7 +29,7 @@ def test_the_board_shows_lead_crew_and_the_managers_state(town: Town, index_path
     from typer.testing import CliRunner
 
     slug = project_board.new_project(town, "mayor", "Control plane").slug
-    manager = StubManager(agents={"lead-1": AgentObserved(handle="lead-1", state="alive"),
+    manager = FakeCore(agents_by_handle={"lead-1": AgentObserved(handle="lead-1", state="alive"),
                                   "crew-2": AgentObserved(handle="crew-2", state="frozen")})
     _configure(town, index_path, monkeypatch, manager)
     run = CliRunner().invoke
@@ -46,7 +46,7 @@ def test_wake_reports_the_managers_verdict_in_its_own_words(town: Town, index_pa
     from typer.testing import CliRunner
 
     slug = project_board.new_project(town, "mayor", "Control plane").slug
-    manager = StubManager(agents={"crew-2": AgentObserved(handle="crew-2", state="frozen")})
+    manager = FakeCore(agents_by_handle={"crew-2": AgentObserved(handle="crew-2", state="frozen")})
     _configure(town, index_path, monkeypatch, manager)
     run = CliRunner().invoke
     run(cli.app, ["office", "record", "crew-2", "--resident", "inspector", "--project", slug])
@@ -59,7 +59,7 @@ def test_an_unrecorded_agent_fails_in_the_terminal_too(town: Town, index_path: P
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     from typer.testing import CliRunner
 
-    _configure(town, index_path, monkeypatch, StubManager())
+    _configure(town, index_path, monkeypatch, FakeCore())
     result = CliRunner().invoke(cli.app, ["office", "wake", "ghost"])
     assert result.exit_code == 1 and "isn't recorded" in result.output
 
