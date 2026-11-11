@@ -45,32 +45,34 @@ CREDENTIAL_STATES = ("pending", "open", "revoked", "failed")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions (
-    id          TEXT PRIMARY KEY,
-    handle      TEXT NOT NULL,
-    verb        TEXT NOT NULL,
-    state       TEXT NOT NULL,
-    said        TEXT NOT NULL DEFAULT '',
-    actor       TEXT NOT NULL,
-    reason      TEXT NOT NULL,
-    boot_id     TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    started_at  TEXT,
-    finished_at TEXT
+    id           TEXT PRIMARY KEY,
+    handle       TEXT NOT NULL,
+    verb         TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    said         TEXT NOT NULL DEFAULT '',
+    actor        TEXT NOT NULL,
+    actor_source TEXT NOT NULL DEFAULT '',
+    reason       TEXT NOT NULL,
+    boot_id      TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    started_at   TEXT,
+    finished_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS actions_by_handle ON actions (handle, verb, state);
 
 CREATE TABLE IF NOT EXISTS audit (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    at        TEXT NOT NULL,
-    event     TEXT NOT NULL,
-    handle    TEXT NOT NULL,
-    identity  TEXT NOT NULL DEFAULT '',
-    actor     TEXT NOT NULL DEFAULT '',
-    verb      TEXT NOT NULL DEFAULT '',
-    reason    TEXT NOT NULL DEFAULT '',
-    state     TEXT NOT NULL DEFAULT '',
-    action_id TEXT,
-    detail    TEXT NOT NULL DEFAULT ''
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           TEXT NOT NULL,
+    event        TEXT NOT NULL,
+    handle       TEXT NOT NULL,
+    identity     TEXT NOT NULL DEFAULT '',
+    actor        TEXT NOT NULL DEFAULT '',
+    actor_source TEXT NOT NULL DEFAULT '',
+    verb         TEXT NOT NULL DEFAULT '',
+    reason       TEXT NOT NULL DEFAULT '',
+    state        TEXT NOT NULL DEFAULT '',
+    action_id    TEXT,
+    detail       TEXT NOT NULL DEFAULT ''
 );
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit
 BEGIN
@@ -137,6 +139,7 @@ class ActionRow:
     reason: str
     boot_id: str
     created_at: str
+    actor_source: str = ""
     started_at: str | None = None
     finished_at: str | None = None
 
@@ -152,6 +155,7 @@ class AuditRow:
     at: str
     identity: str = ""
     actor: str = ""
+    actor_source: str = ""
     verb: str = ""
     reason: str = ""
     state: str = ""
@@ -196,6 +200,14 @@ class Store:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_SCHEMA)
+            self._add_column_if_missing("actions", "actor_source", "TEXT NOT NULL DEFAULT ''")
+            self._add_column_if_missing("audit", "actor_source", "TEXT NOT NULL DEFAULT ''")
+
+    def _add_column_if_missing(self, table: str, column: str, declaration: str) -> None:
+        """A store written before F-7 still opens; provenance is added, not assumed."""
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if column not in {row["name"] for row in rows}:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     # -- transactions ---------------------------------------------------
     def _begin(self) -> None:
@@ -227,6 +239,7 @@ class Store:
         at: str,
         said: str = "",
         state: str = "pending",
+        actor_source: str = "",
     ) -> ActionRow:
         if state not in ACTION_STATES:
             raise StoreError(f"unknown action state {state!r}")
@@ -234,9 +247,9 @@ class Store:
             try:
                 self._begin()
                 self._conn.execute(
-                    "INSERT INTO actions (id, handle, verb, state, said, actor, reason, boot_id, created_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (action_id, handle, verb, state, said, actor, reason, boot_id, at),
+                    "INSERT INTO actions (id, handle, verb, state, said, actor, actor_source, reason,"
+                    " boot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (action_id, handle, verb, state, said, actor, actor_source, reason, boot_id, at),
                 )
                 self._commit()
             except sqlite3.IntegrityError as exc:
@@ -313,10 +326,10 @@ class Store:
                     (state, said, at, action_id),
                 )
                 self._conn.execute(
-                    "INSERT INTO audit (at, event, handle, identity, actor, verb, reason, state, action_id, detail)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (at, event, row.handle, identity, row.actor, row.verb, row.reason, state,
-                     action_id, detail or said),
+                    "INSERT INTO audit (at, event, handle, identity, actor, actor_source, verb,"
+                    " reason, state, action_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (at, event, row.handle, identity, row.actor, row.actor_source, row.verb,
+                     row.reason, state, action_id, detail or said),
                 )
                 self._conn.execute(
                     "DELETE FROM single_flight WHERE handle = ? AND verb = ?",
@@ -399,10 +412,10 @@ class Store:
             raise StoreError(f"unknown audit event {row.event!r}")
         with self._lock:
             self._conn.execute(
-                "INSERT INTO audit (at, event, handle, identity, actor, verb, reason, state, action_id, detail)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (row.at, row.event, row.handle, row.identity, row.actor, row.verb, row.reason,
-                 row.state, row.action_id, row.detail),
+                "INSERT INTO audit (at, event, handle, identity, actor, actor_source, verb, reason,"
+                " state, action_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (row.at, row.event, row.handle, row.identity, row.actor, row.actor_source,
+                 row.verb, row.reason, row.state, row.action_id, row.detail),
             )
 
     def audit(
@@ -524,10 +537,15 @@ class Store:
         return self.get_credential(credential_id)  # type: ignore[return-value]
 
     def note_credential(self, credential_id: str, *, note: str) -> CredentialRecord:
-        """An honest note on a row that stays open (the revoke did not confirm)."""
+        """An honest note on a row that stays open (the revoke did not confirm).
+
+        F-4: a `pending` row takes the same note. A pending row is D-4(b)'s
+        sweeper path, and losing the reason there would make an unrevoked
+        credential look unattempted.
+        """
         with self._lock:
             self._conn.execute(
-                "UPDATE credentials SET note = ? WHERE id = ? AND state = 'open'",
+                "UPDATE credentials SET note = ? WHERE id = ? AND state IN ('open', 'pending')",
                 (note, credential_id),
             )
         return self.get_credential(credential_id)  # type: ignore[return-value]
@@ -535,8 +553,13 @@ class Store:
     def mark_unrevocable(self, credential_id: str, *, note: str) -> CredentialRecord:
         """C-02: a credential nobody can close is recorded as such, and stays open."""
         with self._lock:
+            row = self.get_credential(credential_id)
+            if row is None:
+                raise StoreError(f"no such credential: {credential_id}")
+            if row.state not in ("open", "pending"):
+                raise StoreError(f"credential {credential_id} is {row.state}; unrevocable applies to live rows")
             self._conn.execute(
-                "UPDATE credentials SET unrevocable = 1, note = ? WHERE id = ?",
+                "UPDATE credentials SET unrevocable = 1, note = ? WHERE id = ? AND state IN ('open', 'pending')",
                 (note, credential_id),
             )
         return self.get_credential(credential_id)  # type: ignore[return-value]
@@ -568,15 +591,17 @@ def _action(row: sqlite3.Row) -> ActionRow:
     return ActionRow(
         id=row["id"], handle=row["handle"], verb=row["verb"], state=row["state"],
         said=row["said"], actor=row["actor"], reason=row["reason"], boot_id=row["boot_id"],
-        created_at=row["created_at"], started_at=row["started_at"], finished_at=row["finished_at"],
+        created_at=row["created_at"], actor_source=row["actor_source"],
+        started_at=row["started_at"], finished_at=row["finished_at"],
     )
 
 
 def _audit(row: sqlite3.Row) -> AuditRow:
     return AuditRow(
         event=row["event"], handle=row["handle"], at=row["at"], identity=row["identity"],
-        actor=row["actor"], verb=row["verb"], reason=row["reason"], state=row["state"],
-        action_id=row["action_id"], detail=row["detail"],
+        actor=row["actor"], actor_source=row["actor_source"], verb=row["verb"],
+        reason=row["reason"], state=row["state"], action_id=row["action_id"],
+        detail=row["detail"],
     )
 
 

@@ -62,6 +62,7 @@ class Minted:
 class RevokeOutcome:
     ok: bool
     note: str = ""
+    skipped: bool = False  # F-3: nothing was attempted (never minted), not "revoked"
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,7 @@ class CredentialLedger:
         if row.state == "revoked":
             return RevokeOutcome(True, "already revoked")
         if row.state == "failed":
-            return RevokeOutcome(True, "mint never succeeded; nothing to revoke")
+            return RevokeOutcome(True, "mint never succeeded; nothing to revoke", skipped=True)
         if row.unrevocable:
             return RevokeOutcome(False, "unrevocable")
         adapter = self.registry.for_handle(row.locator)
@@ -276,17 +277,20 @@ class CredentialLedger:
 
     def revoke_all(self, instance: str, reason: str) -> RevokeReport:
         rows = [r for r in self.store.credentials(instance=instance) if r.state in ("open", "pending")]
-        revoked = failed = unrevocable = 0
+        revoked = failed = unrevocable = skipped = 0
         for row in rows:
             if row.unrevocable:
                 unrevocable += 1
                 continue
-            if self.revoke(row.id, reason).ok:
+            outcome = self.revoke(row.id, reason)
+            if outcome.skipped:
+                skipped += 1
+            elif outcome.ok:
                 revoked += 1
             else:
                 failed += 1
         report = RevokeReport(revoked=revoked, failed=failed, unrevocable=unrevocable,
-                              total=len(rows))
+                              skipped=skipped, total=len(rows))
         if failed:
             self.store.insert_audit(AuditRow(
                 event="CREDENTIAL_REVOKE_PARTIAL", handle=instance, at=self._clock(),
@@ -315,7 +319,10 @@ class CredentialLedger:
             if row.unrevocable:
                 unrevocable += 1
                 continue
-            if self.revoke(row.id, "boot-reconcile").ok:
+            outcome = self.revoke(row.id, "boot-reconcile")
+            if outcome.skipped:
+                skipped += 1
+            elif outcome.ok:
                 revoked += 1
             else:
                 failed += 1
@@ -336,7 +343,10 @@ class CredentialLedger:
             if row.unrevocable:
                 unrevocable += 1
                 continue
-            if self.revoke(row.id, "orphan").ok:
+            outcome = self.revoke(row.id, "orphan")
+            if outcome.skipped:
+                continue
+            if outcome.ok:
                 revoked += 1
             else:
                 failed += 1

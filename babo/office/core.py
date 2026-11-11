@@ -213,12 +213,28 @@ class NativeManager:
             ending = launch.get("ending") or ""
             if state == "inactive" or ending == "destroyed":
                 continue
-            if ending in ("idle", "context_limit"):
+            # F-1 (corrected): decide by the recorded state first; the ending is
+            # only a fallback for rows written before the core wrote its own reason.
+            if state == "frozen":
+                reason = ending if ending and ending != "idle" else "standdown"
+                note = ("no pod; the core released it after a stand-down request "
+                        "(work preserved)")
+                if ending == "idle":
+                    note += "; a pre-fix record wrote the session processor's word 'idle' here"
+                observed[handle] = model.AgentObserved(
+                    handle=handle, state="frozen",
+                    checkouts=self._checkouts(handle),
+                    provenance={"podman": "absent", "record": state,
+                                "ended_reason": reason, "note": note},
+                )
+            elif ending in ("idle", "context_limit"):
+                # A pre-fix row with no frozen state: read it, do not migrate it.
                 observed[handle] = model.AgentObserved(
                     handle=handle, state="frozen",
                     checkouts=self._checkouts(handle),
                     provenance={"podman": "absent", "record": state, "ended_reason": ending,
-                                "note": "no pod; the last session ended gracefully"},
+                                "note": "no pod; the last session ended gracefully "
+                                        "(recorded before the core wrote its own reason)"},
                 )
             elif state == "rescued":
                 observed[handle] = model.AgentObserved(
@@ -245,7 +261,7 @@ class NativeManager:
 
     # -- the one write boundary -----------------------------------------
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",
-            action_id: str | None = None) -> str:
+            actor_source: str = "", action_id: str | None = None) -> str:
         if action not in ACTIONS:
             # L-01: refused before a row exists or a thread starts.
             raise CoreRefusal(f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}")
@@ -266,11 +282,11 @@ class NativeManager:
         # A-03 / R5: the actor and the reason are the approval record. Their
         # absence is a refusal, written down (U-03), not a warning.
         if not actor or not actor.strip():
-            return self._refuse(handle, action, actor="<none>", reason=reason,
+            return self._refuse(handle, action, actor="<none>", actor_source="", reason=reason,
                                 detail=f"no approval recorded for {handle} (asked by <none>)")
         if not reason or not reason.strip():
-            return self._refuse(handle, action, actor=actor, reason="",
-                                detail=f"no reason recorded for {handle} (asked by {actor})")
+            return self._refuse(handle, action, actor=actor, actor_source=actor_source, reason="",
+                                detail=f"no reason recorded for {handle} ({_asked(actor, actor_source)})")
 
         identity = self._identity_of(handle) if self._identity_of else None
         facts: ContainerFacts | None = None
@@ -279,32 +295,33 @@ class NativeManager:
                 facts = self.runtime.inspect_container(handle)
             except RuntimeUnavailable as exc:
                 # Cannot decide without facts; refuse rather than assume absence.
-                return self._refuse(handle, action, actor=actor, reason=reason,
+                return self._refuse(handle, action, actor=actor, actor_source=actor_source,
+                                    reason=reason,
                                     detail=f"runtime could not be read, so {action} cannot be "
                                            f"decided for {handle}: {exc}",
                                     identity=identity.identity if identity else "")
 
         verdict = decide(action, facts, identity, handle)
         if isinstance(verdict, Refusal):
-            return self._refuse(handle, action, actor=actor, reason=reason,
-                                detail=verdict.detail,
+            return self._refuse(handle, action, actor=actor, actor_source=actor_source,
+                                reason=reason, detail=verdict.detail,
                                 identity=identity.identity if identity else "")
 
         # Immediate no-ops are honest successes with their own detail.
         if action == "wake" and facts is not None and facts.alive:
-            return self._settle(handle, action, actor, reason, "succeeded",
+            return self._settle(handle, action, actor, actor_source, reason, "succeeded",
                                 f"{handle} is already alive; nothing to wake",
                                 identity=identity.identity if identity else "")
         if action == "spawn" and facts is not None and facts.alive:
-            return self._settle(handle, action, actor, reason, "succeeded",
+            return self._settle(handle, action, actor, actor_source, reason, "succeeded",
                                 f"{handle} is already alive; nothing to spawn",
                                 identity=identity.identity if identity else "")
 
         created = self.clock()
         new_id = action_id or secrets.token_hex(12)
         row = self.store.create_action(action_id=new_id, handle=handle, verb=action,
-                                       actor=actor, reason=reason, boot_id=self.boot_id,
-                                       at=created)
+                                       actor=actor, actor_source=actor_source, reason=reason,
+                                       boot_id=self.boot_id, at=created)
         claimed = self.store.claim_or_read(
             handle, action, new_id, self._expires_at(created), created
         )
@@ -362,13 +379,20 @@ class NativeManager:
 
         if verb == "freeze":
             self._agent_control.request_standdown(handle)
-            if not self._wait_absent(handle):
+            waited = self._wait_absent(handle)
+            if waited == "unreadable":
+                return ("failed",
+                        f"runtime could not be read while waiting for {handle} to stand down; "
+                        "the outcome is unknown", "FREEZE")
+            if waited != "absent":
                 return ("timeout", f"stand-down did not complete for {handle}; the pod is still "
                                    "present and the outcome is unknown", "FREEZE")
             report = self.ledger.revoke_all(handle, "teardown")
+            # F-1: the core released this pod; the agent did not report an ending.
+            # `idle` is the session processor's word and must not be borrowed here.
             self.store.record_launch(handle, boot_id=self.boot_id,
                                      identity=identity.identity if identity else "",
-                                     state="frozen", ending="idle")
+                                     state="frozen", ending="standdown")
             said = f"froze {handle}: pod released, work preserved"
             if report.failed:
                 said += f"; {report.failed} credential(s) could not be revoked"
@@ -376,7 +400,12 @@ class NativeManager:
 
         if verb == "rescue":
             self._agent_control.request_rescue(handle)
-            if not self._wait_absent(handle):
+            waited = self._wait_absent(handle)
+            if waited == "unreadable":
+                return ("failed",
+                        f"runtime could not be read while waiting for {handle} to rescue; "
+                        "the outcome is unknown", "RESCUE")
+            if waited != "absent":
                 return ("timeout", f"rescue did not complete for {handle}; the pod is still "
                                    "present and the outcome is unknown", "RESCUE")
             report = self.ledger.revoke_all(handle, "relaunch")
@@ -424,44 +453,46 @@ class NativeManager:
     # -- small helpers --------------------------------------------------
     def _finish(self, row, state: str, said: str, event: str, identity: str = "") -> None:
         if state not in TERMINAL:
-            state = "failed"
+            # F-6: an unknown verdict word is a defect, not something to coerce.
+            raise ValueError(f"the core produced a non-terminal verdict {state!r}; refusing to write it")
         self.store.finish_action(row.id, state=state, said=said, at=self.clock(),
                                  event=event, identity=identity)
 
-    def _refuse(self, handle: str, action: str, *, actor: str, reason: str, detail: str,
-                identity: str = "") -> str:
+    def _refuse(self, handle: str, action: str, *, actor: str, actor_source: str, reason: str,
+                detail: str, identity: str = "") -> str:
         created = self.clock()
         row = self.store.create_action(
             action_id=secrets.token_hex(12), handle=handle, verb=action, actor=actor,
-            reason=reason, boot_id=self.boot_id, at=created,
+            actor_source=actor_source, reason=reason, boot_id=self.boot_id, at=created,
         )
         self.store.finish_action(row.id, state="refused", said=detail, at=created,
                                  event="REFUSED", identity=identity)
         return row.id
 
-    def _settle(self, handle: str, action: str, actor: str, reason: str, state: str,
-                said: str, identity: str = "") -> str:
+    def _settle(self, handle: str, action: str, actor: str, actor_source: str, reason: str,
+                state: str, said: str, identity: str = "") -> str:
         created = self.clock()
         row = self.store.create_action(
             action_id=secrets.token_hex(12), handle=handle, verb=action, actor=actor,
-            reason=reason, boot_id=self.boot_id, at=created,
+            actor_source=actor_source, reason=reason, boot_id=self.boot_id, at=created,
         )
         event = "SPAWN" if action in ("spawn", "wake") else _event(action, state)
         self.store.finish_action(row.id, state=state, said=said, at=created,
                                  event=event, identity=identity)
         return row.id
 
-    def _wait_absent(self, handle: str) -> bool:
+    def _wait_absent(self, handle: str) -> str:
+        """'absent' | 'present' | 'unreadable' — F-2: an unread runtime is not a pod."""
         deadline = _parse(self.clock()) + timedelta(seconds=self.deadline)
         while True:
             try:
                 facts = self.runtime.inspect_container(handle)
             except RuntimeUnavailable:
-                return False
+                return "unreadable"
             if facts is None:
-                return True
+                return "absent"
             if _parse(self.clock()) >= deadline:
-                return False
+                return "present"
             self._sleep(POLL_S)
 
     def _expires_at(self, created: str) -> str:
@@ -512,6 +543,11 @@ def _provenance(facts: ContainerFacts) -> dict[str, str]:
         return {"podman": "paused",
                 "note": "paused process; this is not the product's freeze (work is in memory)"}
     return {"podman": facts.state}
+
+
+def _asked(actor: str, source: str) -> str:
+    """The actor with its provenance (F-7); a name alone is a string."""
+    return f"asked by {actor} via {source}" if source else f"asked by {actor}"
 
 
 def _event(verb: str, state: str) -> str:

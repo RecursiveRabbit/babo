@@ -174,7 +174,7 @@ def test_freeze_uses_the_agent_handshake_never_a_signal(tmp_path: Path) -> None:
     record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
     assert record.state == "succeeded"
     assert control.calls == ["standdown:agent-a"]
-    assert manager.store.launch("agent-a")["ending"] == "idle"
+    assert manager.store.launch("agent-a")["ending"] == "standdown"
     assert manager.store.audit(event="FREEZE")[0].state == "succeeded"
 
 
@@ -250,11 +250,84 @@ def test_a_destroyed_agent_is_omitted_so_the_join_can_render_missing(tmp_path: P
     assert manager.agents() == []
 
 
+@pytest.mark.parametrize(
+    "state,ending,expected",
+    [
+        ("frozen", "standdown", "frozen"),  # core-initiated stand-down
+        ("frozen", "", "frozen"),           # no ending recorded, state decides
+        ("alive", "", "dead"),              # absence with no graceful end is still death
+        ("x", "idle", "frozen"),            # a pre-fix row keeps its old meaning
+    ],
+)
+def test_the_frozen_dead_discriminator_has_four_cases(
+    tmp_path: Path, state: str, ending: str, expected: str
+) -> None:
+    manager = _manager(tmp_path, RecordingRuntime())
+    manager.store.record_launch("agent-a", boot_id="b1", identity="kimi", state=state,
+                                ending=ending)
+    (agent,) = manager.agents()
+    assert agent.state == expected
+
+
 def test_an_exited_pod_without_a_graceful_end_reads_dead(tmp_path: Path) -> None:
     runtime = RecordingRuntime(facts={"agent-a": ContainerFacts(name="agent-a", state="exited")})
     manager = _manager(tmp_path, runtime)
     (agent,) = manager.agents()
     assert agent.state == "dead"
+
+
+def test_actor_source_is_stored_with_the_name_and_shown_in_refusals(tmp_path: Path) -> None:
+    # F-7: a name without provenance is a string that satisfied a check.
+    manager = _manager(tmp_path, RecordingRuntime())
+    record = manager.action(manager.act("agent-a", "freeze", "", actor="owner",
+                                        actor_source="webui-session"))
+    assert record.state == "refused"
+    assert "(asked by owner via webui-session)" in record.said
+    row = manager.store.get_action(record.id)
+    assert row is not None and row.actor == "owner" and row.actor_source == "webui-session"
+    audit = manager.store.audit(event="REFUSED")[0]
+    assert (audit.actor, audit.actor_source) == ("owner", "webui-session")
+
+
+def test_a_stand_down_the_core_released_does_not_borrow_the_agents_ending(tmp_path: Path) -> None:
+    # F-1: `idle` is the session processor's word; the core says `standdown`.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, agent_control=RecordingControl(runtime),
+                       executor=lambda fn: fn())
+    manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    (agent,) = manager.agents()
+    assert agent.state == "frozen"
+    assert agent.provenance["ended_reason"] == "standdown"
+    assert "core released it" in agent.provenance["note"]
+
+
+def test_an_unreadable_runtime_during_the_wait_is_not_reported_as_still_present(
+    tmp_path: Path,
+) -> None:
+    # F-2: unreadable and present are different answers.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+
+    class GoesDark:
+        def request_standdown(self, handle: str) -> None:
+            runtime.unavailable = "socket gone"
+
+        def request_rescue(self, handle: str) -> None:
+            runtime.unavailable = "socket gone"
+
+    manager = _manager(tmp_path, runtime, agent_control=GoesDark(), deadline=0.05,
+                       sleep=lambda _s: None)
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    assert record.state == "failed"
+    assert "could not be read" in record.said and "still present" not in record.said
+
+
+def test_an_unknown_verdict_word_is_refused_not_coerced(tmp_path: Path) -> None:
+    # F-6: coerce is how a fourth word reaches the page.
+    manager = _manager(tmp_path, RecordingRuntime())
+    row = manager.store.create_action(action_id="a1", handle="agent-a", verb="freeze",
+                                      actor="evans", reason="r", boot_id="b1", at=NOW())
+    with pytest.raises(ValueError):
+        manager._finish(row, "okay", "no", "FREEZE")  # noqa: SLF001 - the guard is the test
 
 
 def test_the_decision_table_is_pure_and_names_the_handle(tmp_path: Path) -> None:

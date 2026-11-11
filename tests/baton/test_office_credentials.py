@@ -243,3 +243,46 @@ def test_unknown_scopes_and_reasons_are_refused_with_the_allowed_set(tmp_path: P
     with pytest.raises(LedgerRefusal) as reason:
         ledger.revoke(row.id, "because")
     assert "boot-reconcile" in str(reason.value)
+
+
+def test_a_never_minted_row_is_skipped_not_counted_as_revoked(tmp_path: Path) -> None:
+    # F-3: nothing was attempted, so nothing was revoked; the skipped counter says so.
+    ledger, _adapter = _ledger(tmp_path)
+    exploding = TokenAdapter("generic:", lambda i, s: f"generic:{i}/{s}",
+                             lambda i, s: (_ for _ in ()).throw(RuntimeError("no mint")),
+                             lambda h: RevokeOutcome(True))
+    ledger.registry.register(exploding)
+    with pytest.raises(MintFailed):
+        ledger.issue(exploding, "agent-a", "generic-token", boot_id="b1", launch_ref="b1:a")
+    (row,) = ledger.store.credentials(instance="agent-a")
+    outcome = ledger.revoke(row.id, "teardown")
+    assert outcome.skipped is True and outcome.ok is True
+    report = ledger.revoke_all("agent-a", "teardown")
+    assert (report.revoked, report.failed, report.skipped) == (0, 0, 0)  # already failed: not selected
+
+
+def test_a_pending_row_takes_the_revoke_failure_note(tmp_path: Path) -> None:
+    # F-4: D-4(b)'s sweeper path must not lose the reason on a pending row.
+    store = _store(tmp_path)
+    ledger = CredentialLedger(store, clock=NOW)
+    store.insert_credential(CredentialRecord(
+        id="c-pending", instance="agent-a", scope="ssh-key", boot_id="b1", launch_ref="b1:a",
+        locator="mystery:opaque", issued_at=NOW(), expires_at=None, state="pending",
+        unrevocable=False,
+    ))
+    report = ledger.revoke_all("agent-a", "boot-reconcile")
+    assert report.failed == 1
+    row = store.get_credential("c-pending")
+    assert row.state == "pending" and row.note == "no revoker for handle kind"
+
+
+def test_unrevocable_cannot_be_marked_on_a_closed_row(tmp_path: Path) -> None:
+    # F-5: the flag means "open on purpose", not "annotate history".
+    store = _store(tmp_path)
+    store.insert_credential(CredentialRecord(
+        id="c-revoked", instance="agent-a", scope="ssh-key", boot_id="b1", launch_ref="b1:a",
+        locator="file:/tmp/x", issued_at=NOW(), expires_at=None, state="revoked",
+        unrevocable=False,
+    ))
+    with pytest.raises(StoreError):
+        store.mark_unrevocable("c-revoked", note="too late")
