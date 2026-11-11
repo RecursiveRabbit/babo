@@ -123,6 +123,30 @@ def test_wake_on_an_awake_agent_succeeds_with_its_own_detail(tmp_path: Path) -> 
     assert ("run", "agent-a") not in runtime.calls
 
 
+def test_spawn_on_an_awake_agent_resolves_to_the_existing_pod(tmp_path: Path) -> None:
+    # L-07: spawn short-circuits on an alive pod instead of running a second
+    # `podman run`; the detail says which happened.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, identity_of=None)
+    record = manager.action(manager.act("agent-a", "spawn", "check", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert "already alive; nothing to spawn (existing pod)" in record.said
+    assert ("run", "agent-a") not in runtime.calls
+
+
+def test_spawn_on_a_starting_record_does_not_create_a_second_pod(tmp_path: Path) -> None:
+    # L-07 / spawner.rb:18-25: a starting record resolves to `starting: true`.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    manager.store.record_launch("agent-a", boot_id="b1", identity="kimi", state="starting")
+    record = manager.action(manager.act("agent-a", "spawn", "check", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert "starting: true" in record.said
+    assert runtime.calls == [("inspect", "agent-a")]
+
+
 def test_spawn_without_an_identity_or_channel_is_refused(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime(), identity_of=None)
     record = manager.action(manager.act("agent-a", "spawn", "because", actor="evans", actor_source="terminal"))

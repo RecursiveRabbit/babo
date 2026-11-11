@@ -91,12 +91,21 @@ Decision = Refusal | Permit
 
 
 def decide(verb: str, facts: ContainerFacts | None, identity: Identity | None,
-           handle: str) -> Decision:
-    """The precondition table (L-03), pure: no I/O, no clock, no model."""
+           handle: str, record_state: str = "") -> Decision:
+    """The precondition table (L-03), pure: no I/O, no clock, no model.
+
+    ``record_state`` is the core's own launch record (`alive`, `starting`, …).
+    It is an input to L-07's spawn short-circuit: a spawn resolves to the
+    existing pod for an alive record and to `starting: true` for a starting one,
+    so it never reaches the runtime a second time.
+    """
     if verb in ("spawn", "wake"):
-        # Wake on an awake pod is a success that says so, before identity is
-        # even consulted (office_action_runner.rb:56).
-        if verb == "wake" and facts is not None and facts.alive:
+        # A pod that is already there resolves the verb before identity is even
+        # consulted (office_action_runner.rb:56 for wake; spawner.rb:18-25 for
+        # spawn's alive/starting short-circuit).
+        if facts is not None and facts.alive:
+            return Permit()
+        if verb == "spawn" and record_state in ("alive", "starting"):
             return Permit()
         if identity is None:
             return Refusal(f"no identity/channel recorded for {handle}; cannot {verb}")
@@ -295,6 +304,8 @@ class NativeManager:
                                 detail=f"no reason recorded for {handle} ({_asked(actor, actor_source)})")
 
         identity = self._identity_of(handle) if self._identity_of else None
+        launch = self.store.launch(handle) or {}
+        record_state = str(launch.get("state") or "")
         facts: ContainerFacts | None = None
         if action in ("spawn", "wake", "freeze", "rescue", "destroy"):
             try:
@@ -307,7 +318,7 @@ class NativeManager:
                                            f"decided for {handle}: {exc}",
                                     identity=identity.identity if identity else "")
 
-        verdict = decide(action, facts, identity, handle)
+        verdict = decide(action, facts, identity, handle, record_state)
         if isinstance(verdict, Refusal):
             return self._refuse(handle, action, actor=actor, actor_source=actor_source,
                                 reason=reason, detail=verdict.detail,
@@ -320,7 +331,13 @@ class NativeManager:
                                 identity=identity.identity if identity else "")
         if action == "spawn" and facts is not None and facts.alive:
             return self._settle(handle, action, actor, actor_source, reason, "succeeded",
-                                f"{handle} is already alive; nothing to spawn",
+                                f"{handle} is already alive; nothing to spawn (existing pod)",
+                                identity=identity.identity if identity else "")
+        if action == "spawn" and record_state == "starting":
+            # L-07 / spawner.rb:18-25: a starting pod is not spawned again; the
+            # caller is told it is starting, not handed a second pod.
+            return self._settle(handle, action, actor, actor_source, reason, "succeeded",
+                                f"{handle} is starting; nothing to spawn (starting: true)",
                                 identity=identity.identity if identity else "")
 
         created = self.clock()
