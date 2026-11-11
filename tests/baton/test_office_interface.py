@@ -46,13 +46,32 @@ def test_the_action_vocabulary_and_terminal_states_are_closed() -> None:
     assert api.TERMINAL == ("succeeded", "failed", "refused", "timeout")
 
 
-def test_an_unbuilt_core_is_an_honest_error_not_a_fallback() -> None:
-    try:
-        api.manager_for(None)
-    except api.CoreNotBuiltError as exc:
-        assert "hasn't landed" in str(exc)
-    else:  # pragma: no cover - only once the manager slice lands
-        raise AssertionError("no core should exist before the manager slice lands")
+def test_the_core_is_native_or_honestly_absent(tmp_path) -> None:
+    """One assertion for two heads, because this branch must be true alone and
+    still true after the manager slice lands on top of it.
+
+    - no `babo.office.core` yet: the product says "hasn't landed" and stays
+      read-only (no stub, no fallback);
+    - core present: it satisfies the interface and imports no HTTP client or
+      manager URL — the seam must not come back as a dependency of the core.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("babo.office.core") is None:
+        try:
+            api.manager_for(None)
+        except api.CoreNotBuiltError as exc:
+            assert "hasn't landed" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("no core should exist before the manager slice lands")
+        return
+
+    import inspect
+
+    core = importlib.import_module("babo.office.core")
+    source = inspect.getsource(core)
+    for client in ("requests", "httpx", "NEOCLAW_MANAGER_URL", "ManagerBackend", "manager_url"):
+        assert client not in source, f"the core must not reach an HTTP manager ({client})"
 
 
 def test_credential_rows_are_identity_only() -> None:
