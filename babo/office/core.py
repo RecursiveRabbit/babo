@@ -37,7 +37,7 @@ from typing import Callable
 
 from babo.office import model
 from babo.office.api import ACTIONS, TERMINAL, ActionRecord
-from babo.office.audit import Store
+from babo.office.audit import ActionRow, Store
 from babo.office.credentials import CredentialLedger
 from babo.office.runtime import (
     AgentControl,
@@ -367,7 +367,7 @@ class NativeManager:
             state, said, event = "failed", f"{type(exc).__name__}: {exc}"[:400], _event(row.verb, "failed")
         self._finish(row, state, said, event, identity.identity if identity else "")
 
-    def _execute(self, row, identity: Identity | None) -> tuple[str, str, str]:
+    def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[str, str, str]:
         handle, verb = row.handle, row.verb
         if verb in ("spawn", "wake"):
             if identity is None:
@@ -459,7 +459,7 @@ class NativeManager:
         return "refused", f"unknown action {verb!r}", "REFUSED"
 
     # -- small helpers --------------------------------------------------
-    def _finish(self, row, state: str, said: str, event: str, identity: str = "") -> None:
+    def _finish(self, row: ActionRow, state: str, said: str, event: str, identity: str = "") -> None:
         if state not in TERMINAL:
             # F-6: an unknown verdict word is a defect, not something to coerce.
             raise ValueError(f"the core produced a non-terminal verdict {state!r}; refusing to write it")
@@ -526,8 +526,9 @@ class NativeManager:
     def boot_reconcile(self) -> dict[str, object]:
         """Conservative in both directions. Unreadable runtime = nothing revoked."""
         try:
-            live = {facts.labels.get(HANDLE_LABEL) or facts.name
-                    for facts in self.runtime.list_agents()}
+            live: set[str] = set()
+            for facts in self.runtime.list_agents():
+                live.add(facts.labels.get(HANDLE_LABEL) or facts.name)
             readable = True
         except RuntimeUnavailableError:
             live = set()

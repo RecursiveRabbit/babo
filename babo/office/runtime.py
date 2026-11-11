@@ -25,7 +25,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 
 class RuntimeUnavailableError(RuntimeError):
@@ -220,13 +220,25 @@ class PodmanRuntime:
         del out  # absence is fine: the pod is gone either way
 
 
+def _obj(value: object) -> dict[str, Any]:
+    """A JSON object from podman, or an empty one. Narrowed, not trusted."""
+    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
+
+
+def _seq(value: object) -> list[Any]:
+    """A JSON array from podman, or an empty one."""
+    return cast("list[Any]", value) if isinstance(value, list) else []
+
+
 def container_facts(payload: dict[str, Any]) -> ContainerFacts:
-    config = payload.get("Config") or {}
-    host = payload.get("HostConfig") or {}
-    state = (payload.get("State") or {}).get("Status") or ""
-    networks = ((payload.get("NetworkSettings") or {}).get("Networks") or {})
+    config = _obj(payload.get("Config"))
+    host = _obj(payload.get("HostConfig"))
+    state_obj = _obj(payload.get("State"))
+    state = str(state_obj.get("Status") or "")
+    networks = _obj(_obj(payload.get("NetworkSettings")).get("Networks"))
     ip = ""
-    for entry in networks.values():
+    for entry_value in networks.values():
+        entry = _obj(entry_value)
         if entry.get("IPAddress"):
             ip = str(entry["IPAddress"])
             break
@@ -236,28 +248,28 @@ def container_facts(payload: dict[str, Any]) -> ContainerFacts:
             destination=str(item.get("Destination") or ""),
             read_only=not bool(item.get("RW", False)),
         )
-        for item in payload.get("Mounts") or []
+        for item in (_obj(raw) for raw in _seq(payload.get("Mounts")))
     )
     return ContainerFacts(
         name=str(payload.get("Name") or "").lstrip("/"),
-        state=str(state),
+        state=state,
         image=str(config.get("Image") or ""),
         mounts=mounts,
-        cap_add=tuple(host.get("CapAdd") or ()),
-        cap_drop=tuple(host.get("CapDrop") or ()),
+        cap_add=tuple(str(cap) for cap in _seq(host.get("CapAdd"))),
+        cap_drop=tuple(str(cap) for cap in _seq(host.get("CapDrop"))),
         network_mode=str(host.get("NetworkMode") or ""),
-        labels=dict(config.get("Labels") or {}),
-        started_at=str((payload.get("State") or {}).get("StartedAt") or ""),
+        labels={str(key): str(value) for key, value in _obj(config.get("Labels")).items()},
+        started_at=str(state_obj.get("StartedAt") or ""),
         ip=ip,
     )
 
 
 def network_facts(payload: dict[str, Any]) -> NetworkFacts:
-    subnets: Iterable[dict[str, Any]] = payload.get("subnets") or []
-    first = next(iter(subnets), {})
+    subnets = _seq(payload.get("subnets"))
+    first = _obj(subnets[0]) if subnets else {}
     containers = tuple(
-        (str(name), str((entry or {}).get("ipv4_address") or ""))
-        for name, entry in (payload.get("containers") or {}).items()
+        (str(name), str(_obj(entry).get("ipv4_address") or ""))
+        for name, entry in _obj(payload.get("containers")).items()
     )
     return NetworkFacts(
         name=str(payload.get("name") or ""),
