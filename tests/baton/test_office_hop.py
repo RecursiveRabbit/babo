@@ -15,7 +15,7 @@ from babo.office.model import AgentObserved
 from babo.office.service import ManagerService
 from baton.office_fakes import FakeCore
 
-UI = "10.0.0.5"
+UI = "10.0.0.11"
 
 
 def _core(**kwargs: object) -> FakeCore:
@@ -65,7 +65,7 @@ def test_only_the_ui_pod_gets_in() -> None:
     status, payload = svc.agents("10.0.0.99")
     assert status == 403 and "not the UI pod" in payload["detail"]
     # an exact match is the rule: a neighbour address is not "close enough"
-    assert svc.act("10.0.0.50", {"handle": "crew-1", "action": "wake", "reason": "r",
+    assert svc.act("10.0.0.110", {"handle": "crew-1", "action": "wake", "reason": "r",
                                  "actor": "owner", "actor_source": "webui-session"})[0] == 403
 
 

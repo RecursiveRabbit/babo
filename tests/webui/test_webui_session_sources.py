@@ -97,12 +97,12 @@ def test_a_trusted_listener_keeps_its_rendered_address_and_gets_no_static_route(
     from babo.config.schema import Config
 
     cfg = Config.model_validate({
-        "channels": {"websocket": {"enabled": True, "host": "10.0.0.5", "port": 18790,
+        "channels": {"websocket": {"enabled": True, "host": "10.0.0.11", "port": 18790,
                                    "trusted_sources": ["10.0.0.2/32"]}},
     })
     changed = _ensure_local_webui_channel(cfg, port=18790, yes=True)
     ws = cfg.channels.websocket
-    assert ws["host"] == "10.0.0.5", "the deliberate bind must survive setup"
+    assert ws["host"] == "10.0.0.11", "the deliberate bind must survive setup"
     assert ws.get("token_issue_secret", "") == "", "no static issuance route on a trusted listener"
     assert ws.get("token_issue_path", "") == ""
     assert ws["trusted_sources"] == ["10.0.0.2/32"]

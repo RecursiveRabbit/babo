@@ -179,13 +179,13 @@ async def test_the_office_view_reports_the_ui_listener_not_the_health_port(town:
 
     cfg = Config.model_validate({"baton": {"town": str(town.root), "indexPath": str(index_path),
                                           "office": {"backend": "stub"}},
-                                 "gateway": {"host": "10.0.0.5", "port": 18790},
-                                 "channels": {"websocket": {"host": "10.0.0.5", "port": 8843}}})
+                                 "gateway": {"host": "10.0.0.11", "port": 18790},
+                                 "channels": {"websocket": {"host": "10.0.0.11", "port": 8843}}})
     monkeypatch.setattr("babo.config.loader.load_config", lambda *_a, **_k: cfg)
     monkeypatch.setattr(office_api, "_ops", lambda: __import__("babo.office.control", fromlist=["Ops"]).Ops())
     status, view = await _call(routes, "/api/office")
     assert status == 200
-    assert view["listener"] == "10.0.0.5:8843", "the UI port, never the health port"
+    assert view["listener"] == "10.0.0.11:8843", "the UI port, never the health port"
 
 
 async def test_before_the_core_lands_the_office_says_so(town: Town, index_path: Path,
