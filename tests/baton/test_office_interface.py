@@ -42,7 +42,7 @@ def test_no_runtime_handle_or_capability_argument_crosses_the_interface() -> Non
 
 
 def test_the_action_vocabulary_and_terminal_states_are_closed() -> None:
-    assert api.ACTIONS == ("spawn", "wake", "freeze", "rescue", "destroy")
+    assert api.ACTIONS == ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
     assert api.TERMINAL == ("succeeded", "failed", "refused", "timeout")
 
 

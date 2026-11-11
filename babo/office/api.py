@@ -36,8 +36,10 @@ from typing import Protocol, cast, runtime_checkable
 
 from babo.office.model import AgentObserved
 
-# The core's action vocabulary. The page currently exposes the first two.
-ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy")
+# The closed action vocabulary. `restart-ui` is the cross-pod half of revocation:
+# it asks the Manager to replace the UI pod, which invalidates every in-memory
+# session by construction (D-12: revocation is owned by the pod holding the store).
+ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
 
 # Terminal states, verbatim. Anything else is still in flight.
 TERMINAL = ("succeeded", "failed", "refused", "timeout")
