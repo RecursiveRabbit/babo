@@ -24,7 +24,7 @@ from babo.office.core import (
 )
 from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
 from babo.office.runtime import ContainerFacts, LaunchSpec
-from tests.baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
+from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
 
