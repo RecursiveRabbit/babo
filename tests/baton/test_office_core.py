@@ -317,7 +317,8 @@ def test_an_unreadable_runtime_during_the_wait_is_not_reported_as_still_present(
     manager = _manager(tmp_path, runtime, agent_control=GoesDark(), deadline=0.05,
                        sleep=lambda _s: None)
     record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
-    assert record.state == "failed"
+    # F-8: no verdict arrived, so the word is `timeout`; `failed` would mean it ran and broke.
+    assert record.state == "timeout"
     assert "could not be read" in record.said and "still present" not in record.said
 
 

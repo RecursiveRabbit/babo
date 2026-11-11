@@ -381,7 +381,8 @@ class NativeManager:
             self._agent_control.request_standdown(handle)
             waited = self._wait_absent(handle)
             if waited == "unreadable":
-                return ("failed",
+                # F-8: no verdict arrived; that is `timeout`, not `failed` (L-02).
+                return ("timeout",
                         f"runtime could not be read while waiting for {handle} to stand down; "
                         "the outcome is unknown", "FREEZE")
             if waited != "absent":
@@ -402,7 +403,8 @@ class NativeManager:
             self._agent_control.request_rescue(handle)
             waited = self._wait_absent(handle)
             if waited == "unreadable":
-                return ("failed",
+                # F-8: the same closed definition applies to rescue.
+                return ("timeout",
                         f"runtime could not be read while waiting for {handle} to rescue; "
                         "the outcome is unknown", "RESCUE")
             if waited != "absent":
