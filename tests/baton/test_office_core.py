@@ -14,10 +14,10 @@ import pytest
 from babo.office.api import ActionRecord
 from babo.office.audit import Store
 from babo.office.core import (
-    CoreRefusalError,
     HANDLE_LABEL,
-    Identity,
     MANAGED_LABEL,
+    CoreRefusalError,
+    Identity,
     NativeManager,
     UnknownActionError,
     decide,

@@ -14,8 +14,8 @@ from babo.office.credentials import (
     CredentialLedger,
     FileAdapter,
     LedgerRefusalError,
-    MintFailedError,
     Minted,
+    MintFailedError,
     RevokeOutcome,
     TokenAdapter,
 )
