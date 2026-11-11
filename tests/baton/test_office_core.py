@@ -61,7 +61,7 @@ def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) 
     manager = _manager(tmp_path, runtime)
     with pytest.raises(CoreRefusalError) as caught:
         manager.act("agent-a", "explode", "because", actor="evans", actor_source="terminal")
-    assert "it is one of spawn, wake, freeze, rescue, destroy" in str(caught.value)
+    assert "it is one of spawn, wake, freeze, rescue, destroy, restart-ui" in str(caught.value)
     assert manager.store.actions() == []
     assert runtime.calls == []
 
@@ -144,6 +144,19 @@ def test_spawn_on_a_starting_record_does_not_create_a_second_pod(tmp_path: Path)
                                         actor_source="terminal"))
     assert record.state == "succeeded"
     assert "starting: true" in record.said
+    assert runtime.calls == [("inspect", "agent-a")]
+
+
+def test_spawn_on_an_alive_record_resolves_before_the_identity_gate(tmp_path: Path) -> None:
+    # L-07: the record is the core's own knowledge that a pod was already made,
+    # so it resolves the verb with no `run` and no identity re-ask.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime, identity_of=None)
+    manager.store.record_launch("agent-a", boot_id="b1", identity="kimi", state="alive")
+    record = manager.action(manager.act("agent-a", "spawn", "check", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert "existing pod" in record.said
     assert runtime.calls == [("inspect", "agent-a")]
 
 
@@ -391,3 +404,115 @@ def test_the_manager_satisfies_the_office_interface(tmp_path: Path) -> None:
     assert isinstance(_manager(tmp_path, RecordingRuntime()), OfficeManager)
     assert isinstance(_manager(tmp_path, RecordingRuntime()).action, object)
     assert ActionRecord(id="x", handle="a", action="spawn").terminal is False
+
+
+# -- L-10: `restart-ui`, the recorded sixth verb -------------------------
+# The verb replaces the UI pod and thereby kills the sessions the old process
+# held in memory. Its row's handle is the pod's name; the agents view never
+# lists it (§8.1); and with the vocabulary six-wide no refusal may name the verb
+# as both known and unknown (Bomu's acceptance (f)).
+
+UI = "babo-ui"
+
+
+def _ui_pod(state: str = "running") -> ContainerFacts:
+    return ContainerFacts(name=UI, state=state, ip="10.0.0.11")
+
+
+def _ui_spec() -> LaunchSpec:
+    return LaunchSpec(name=UI, image="babo-ui:test")
+
+
+def test_the_six_wide_vocabulary_never_names_a_verb_as_known_and_unknown(
+    tmp_path: Path,
+) -> None:
+    # L-10 acceptance (f): the old sentence would have read "unknown action
+    # 'restart-ui'; it is one of ..., restart-ui". Naming the verb once is the
+    # whole assertion.
+    manager = _manager(tmp_path, RecordingRuntime())
+    with pytest.raises(CoreRefusalError) as caught:
+        manager.act("agent-a", "explode", "because", actor="evans", actor_source="terminal")
+    detail = str(caught.value)
+    assert "restart-ui" in detail
+    assert detail.count("restart-ui") == 1
+
+
+def test_restart_ui_with_no_ui_pod_is_refused_and_names_the_pod(tmp_path: Path) -> None:
+    # L-10: a restart of nothing is not a success.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    record = manager.action(manager.act(UI, "restart-ui", "sessions leaked", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "refused"
+    assert record.said == "nothing to restart: no babo-ui pod"
+    assert runtime.calls == [("inspect", UI)]
+
+
+def test_restart_ui_on_a_pod_that_is_not_alive_names_the_state(tmp_path: Path) -> None:
+    # A pod that is not alive is a spawn question: its sessions already died
+    # with it, so there is nothing here to invalidate.
+    runtime = RecordingRuntime(facts={UI: _ui_pod("exited")})
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    record = manager.action(manager.act(UI, "restart-ui", "x", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "refused"
+    assert record.said == "nothing to restart: babo-ui is exited, not alive"
+    assert ("remove", UI) not in runtime.calls
+
+
+def test_restart_ui_replaces_the_pod_and_invalidates_by_construction(tmp_path: Path) -> None:
+    # L-10 (b)/(c): the row's handle is the pod's name, the old pod is removed
+    # before the new one runs, and the audit row names the actor and the reason.
+    runtime = RecordingRuntime(facts={UI: _ui_pod()})
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    record = manager.action(manager.act(UI, "restart-ui", "operator requested", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert record.handle == UI
+    assert [call for call in runtime.calls if call[0] in ("remove", "run")] == [
+        ("remove", UI), ("run", UI)
+    ]
+    assert "sessions minted before it died with the old process" in record.said
+    audit = manager.store.audit(event="UI_RESTART")
+    assert audit[0].handle == UI
+    assert audit[0].actor == "evans"
+    assert audit[0].reason == "operator requested"
+
+
+def test_restart_ui_without_a_renderer_names_the_gap_and_leaves_the_ui_alone(
+    tmp_path: Path,
+) -> None:
+    # The named gap, not a silent success: no renderer means the old pod must not
+    # be removed, because the product would be left with no UI at all.
+    runtime = RecordingRuntime(facts={UI: _ui_pod()})
+    manager = _manager(tmp_path, runtime)  # no ui_spec
+    record = manager.action(manager.act(UI, "restart-ui", "x", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert "ui_spec is not wired" in record.said
+    assert ("remove", UI) not in runtime.calls
+
+
+def test_a_direct_execute_cannot_spawn_a_second_pod(tmp_path: Path) -> None:
+    # D12-10e2 (Bomu): `act()` is not the only road to `_execute`, so the
+    # executor re-reads the world before the one call that makes a pod.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime)
+    row = manager.store.create_action(action_id="direct", handle="agent-a", verb="spawn",
+                                      actor="evans", reason="r", boot_id="b1", at=NOW())
+    state, said, _ = manager._execute(row, Identity("kimi", "project-x"))  # noqa: SLF001
+    assert state == "succeeded"
+    assert "existing pod" in said
+    assert [call for call in runtime.calls if call[0] == "run"] == []
+
+
+def test_the_ui_pod_is_never_listed_as_an_agent(tmp_path: Path) -> None:
+    # §8.1 (d)/(e): the action table names what was acted on; the agents view
+    # lists agents. The two facts coexist, which is why the row keeps the name.
+    runtime = RecordingRuntime(facts={UI: _ui_pod(), "agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    handles = [agent.handle for agent in manager.agents()]
+    assert UI not in handles
+    assert "agent-a" in handles
+    action_id = manager.act(UI, "restart-ui", "x", actor="evans", actor_source="terminal")
+    assert manager.action(action_id).handle == UI
