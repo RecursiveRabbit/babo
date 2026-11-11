@@ -42,11 +42,11 @@ from babo.office.credentials import CredentialLedger
 from babo.office.runtime import (
     AgentControl,
     ContainerFacts,
-    ControlUnavailable,
+    ControlUnavailableError,
     LaunchSpec,
     PodmanRuntime,
     Runtime,
-    RuntimeUnavailable,
+    RuntimeUnavailableError,
     UnwiredAgentControl,
 )
 
@@ -59,7 +59,7 @@ SYSTEM_ACTORS = ("system:watchdog", "system:reconcile", "system:boot")
 POLL_S = 0.5
 
 
-class CoreRefusal(Exception):
+class CoreRefusalError(Exception):
     """The boundary declined and nothing was written (L-01: unknown verb)."""
 
     def __init__(self, detail: str) -> None:
@@ -67,7 +67,7 @@ class CoreRefusal(Exception):
         self.detail = detail
 
 
-class UnknownAction(CoreRefusal):
+class UnknownActionError(CoreRefusalError):
     """No such action id — not-found, never a synthesised `failed` (L-04)."""
 
 
@@ -169,7 +169,7 @@ class NativeManager:
     def health(self) -> tuple[bool, str]:
         try:
             self.runtime.inspect_container("__babo-core-probe__")
-        except RuntimeUnavailable as exc:
+        except RuntimeUnavailableError as exc:
             return False, str(exc)
         return True, "native core; runtime reachable"
 
@@ -177,7 +177,7 @@ class NativeManager:
         try:
             facts = self.runtime.list_agents()
             error = ""
-        except RuntimeUnavailable as exc:
+        except RuntimeUnavailableError as exc:
             facts = []
             error = str(exc)
 
@@ -255,7 +255,7 @@ class NativeManager:
     def action(self, action_id: str) -> ActionRecord:
         row = self.store.get_action(action_id)
         if row is None:
-            raise UnknownAction(f"no such action: {action_id}")
+            raise UnknownActionError(f"no such action: {action_id}")
         return ActionRecord(id=row.id, handle=row.handle, action=row.verb, state=row.state,
                            said=row.said)
 
@@ -264,16 +264,16 @@ class NativeManager:
             actor_source: str = "", action_id: str | None = None) -> str:
         if action not in ACTIONS:
             # L-01: refused before a row exists or a thread starts.
-            raise CoreRefusal(f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}")
+            raise CoreRefusalError(f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}")
         if not handle or not handle.strip():
-            raise CoreRefusal("no handle recorded; nothing to act on")
+            raise CoreRefusalError("no handle recorded; nothing to act on")
 
         # Replay of a known row: no new row, no dispatch, no effect (L-07).
         if action_id:
             existing = self.store.get_action(action_id)
             if existing is not None:
                 if existing.handle != handle or existing.verb != action:
-                    raise CoreRefusal(
+                    raise CoreRefusalError(
                         f"action id {action_id} belongs to ({existing.handle}, {existing.verb}), "
                         f"not ({handle}, {action})"
                     )
@@ -284,6 +284,12 @@ class NativeManager:
         if not actor or not actor.strip():
             return self._refuse(handle, action, actor="<none>", actor_source="", reason=reason,
                                 detail=f"no approval recorded for {handle} (asked by <none>)")
+        if not actor_source or not actor_source.strip():
+            # F-7 as a gate: a name without provenance is a string that satisfied
+            # a check, not an identity. Its own detail, not the missing-actor one.
+            return self._refuse(handle, action, actor=actor, actor_source="", reason=reason,
+                                detail=f"no actor source recorded for {handle} (asked by {actor}); "
+                                       "a name without provenance is not an identity")
         if not reason or not reason.strip():
             return self._refuse(handle, action, actor=actor, actor_source=actor_source, reason="",
                                 detail=f"no reason recorded for {handle} ({_asked(actor, actor_source)})")
@@ -293,7 +299,7 @@ class NativeManager:
         if action in ("spawn", "wake", "freeze", "rescue", "destroy"):
             try:
                 facts = self.runtime.inspect_container(handle)
-            except RuntimeUnavailable as exc:
+            except RuntimeUnavailableError as exc:
                 # Cannot decide without facts; refuse rather than assume absence.
                 return self._refuse(handle, action, actor=actor, actor_source=actor_source,
                                     reason=reason,
@@ -353,9 +359,9 @@ class NativeManager:
         identity = self._identity_of(row.handle) if self._identity_of else None
         try:
             state, said, event = self._execute(row, identity)
-        except ControlUnavailable as exc:
+        except ControlUnavailableError as exc:
             state, said, event = "failed", str(exc), _event(row.verb, "failed")
-        except RuntimeUnavailable as exc:
+        except RuntimeUnavailableError as exc:
             state, said, event = "failed", f"runtime unavailable: {exc}", _event(row.verb, "failed")
         except Exception as exc:  # a decision path must never guess; it records
             state, said, event = "failed", f"{type(exc).__name__}: {exc}"[:400], _event(row.verb, "failed")
@@ -437,7 +443,7 @@ class NativeManager:
                 mesh_note = "; mesh peer freeze not wired (network.py not landed)"
             try:
                 self.runtime.remove(handle)
-            except RuntimeUnavailable as exc:
+            except RuntimeUnavailableError as exc:
                 return "failed", f"destroy of {handle} did not remove the pod: {exc}", "TEARDOWN_PARTIAL"
             self.store.record_launch(handle, boot_id=self.boot_id,
                                      identity=identity.identity if identity else "",
@@ -484,17 +490,25 @@ class NativeManager:
         return row.id
 
     def _wait_absent(self, handle: str) -> str:
-        """'absent' | 'present' | 'unreadable' — F-2: an unread runtime is not a pod."""
+        """'absent' | 'present' | 'unreadable' — polled to the deadline.
+
+        An unread runtime is not a verdict: the wait keeps trying until the
+        deadline, so `timeout` means the deadline passed with no answer, not
+        that the first read failed (F-8's clock note).
+        """
         deadline = _parse(self.clock()) + timedelta(seconds=self.deadline)
+        unreadable = ""
         while True:
             try:
                 facts = self.runtime.inspect_container(handle)
-            except RuntimeUnavailable:
-                return "unreadable"
-            if facts is None:
-                return "absent"
+            except RuntimeUnavailableError as exc:
+                unreadable = str(exc)
+            else:
+                unreadable = ""
+                if facts is None:
+                    return "absent"
             if _parse(self.clock()) >= deadline:
-                return "present"
+                return "unreadable" if unreadable else "present"
             self._sleep(POLL_S)
 
     def _expires_at(self, created: str) -> str:
@@ -515,7 +529,7 @@ class NativeManager:
             live = {facts.labels.get(HANDLE_LABEL) or facts.name
                     for facts in self.runtime.list_agents()}
             readable = True
-        except RuntimeUnavailable:
+        except RuntimeUnavailableError:
             live = set()
             readable = False
         report = self.ledger.reconcile_boot(boot_id=self.boot_id, live_instances=live,

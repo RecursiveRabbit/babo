@@ -14,12 +14,12 @@ import pytest
 from babo.office.api import ActionRecord
 from babo.office.audit import Store
 from babo.office.core import (
+    CoreRefusalError,
     HANDLE_LABEL,
-    MANAGED_LABEL,
-    CoreRefusal,
     Identity,
+    MANAGED_LABEL,
     NativeManager,
-    UnknownAction,
+    UnknownActionError,
     decide,
 )
 from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
@@ -59,8 +59,8 @@ def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) 
     # L-01: validation happens before a row exists or a thread starts.
     runtime = RecordingRuntime()
     manager = _manager(tmp_path, runtime)
-    with pytest.raises(CoreRefusal) as caught:
-        manager.act("agent-a", "explode", "because", actor="evans")
+    with pytest.raises(CoreRefusalError) as caught:
+        manager.act("agent-a", "explode", "because", actor="evans", actor_source="terminal")
     assert "it is one of spawn, wake, freeze, rescue, destroy" in str(caught.value)
     assert manager.store.actions() == []
     assert runtime.calls == []
@@ -78,18 +78,28 @@ def test_no_actor_is_refused_and_the_refusal_is_durable(tmp_path: Path) -> None:
     assert manager.store.audit(event="REFUSED")[0].actor == "<none>"
 
 
+def test_an_actor_without_provenance_is_refused_with_its_own_detail(tmp_path: Path) -> None:
+    # F-7 as a gate: the name alone is not an identity.
+    manager = _manager(tmp_path, RecordingRuntime())
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="owner"))
+    assert record.state == "refused"
+    assert "no actor source recorded for agent-a (asked by owner)" in record.said
+    row = manager.store.get_action(record.id)
+    assert row is not None and row.actor == "owner" and row.actor_source == ""
+
+
 def test_no_reason_is_refused_and_names_the_actor(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime())
-    record = manager.action(manager.act("agent-a", "freeze", "  ", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "  ", actor="evans", actor_source="terminal"))
     assert record.state == "refused"
-    assert "no reason recorded for agent-a (asked by evans)" in record.said
+    assert "no reason recorded for agent-a (asked by evans via terminal)" in record.said
 
 
 def test_refused_actions_leave_no_podman_effect(tmp_path: Path) -> None:
     # L-03 acceptance: the runtime double records calls, and only the inspect happened.
     runtime = RecordingRuntime()
     manager = _manager(tmp_path, runtime)
-    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans", actor_source="terminal"))
     assert record.state == "refused"
     assert record.said == "nothing to freeze: no pod for agent-a"
     assert runtime.calls == [("inspect", "agent-a")]
@@ -98,7 +108,7 @@ def test_refused_actions_leave_no_podman_effect(tmp_path: Path) -> None:
 def test_freeze_on_a_pod_that_is_not_alive_names_the_state(tmp_path: Path) -> None:
     runtime = RecordingRuntime(facts={"agent-a": ContainerFacts(name="agent-a", state="paused")})
     manager = _manager(tmp_path, runtime)
-    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans", actor_source="terminal"))
     assert record.state == "refused"
     assert record.said == "agent-a is paused, not alive; nothing to freeze"
 
@@ -107,7 +117,7 @@ def test_wake_on_an_awake_agent_succeeds_with_its_own_detail(tmp_path: Path) -> 
     # L-07(b): a success that says so, not an error and not a fake restart.
     runtime = RecordingRuntime(facts={"agent-a": _alive()})
     manager = _manager(tmp_path, runtime, identity_of=None)
-    record = manager.action(manager.act("agent-a", "wake", "check", actor="evans"))
+    record = manager.action(manager.act("agent-a", "wake", "check", actor="evans", actor_source="terminal"))
     assert record.state == "succeeded"
     assert record.said == "agent-a is already alive; nothing to wake"
     assert ("run", "agent-a") not in runtime.calls
@@ -115,7 +125,7 @@ def test_wake_on_an_awake_agent_succeeds_with_its_own_detail(tmp_path: Path) -> 
 
 def test_spawn_without_an_identity_or_channel_is_refused(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime(), identity_of=None)
-    record = manager.action(manager.act("agent-a", "spawn", "because", actor="evans"))
+    record = manager.action(manager.act("agent-a", "spawn", "because", actor="evans", actor_source="terminal"))
     assert record.state == "refused"
     assert record.said == "no identity/channel recorded for agent-a; cannot spawn"
 
@@ -123,7 +133,7 @@ def test_spawn_without_an_identity_or_channel_is_refused(tmp_path: Path) -> None
 def test_spawn_records_a_launch_and_an_audit_row(tmp_path: Path) -> None:
     runtime = RecordingRuntime()
     manager = _manager(tmp_path, runtime)
-    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans"))
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans", actor_source="terminal"))
     assert record.state == "succeeded"
     assert record.said == "spawned agent-a at 10.89.0.42"
     launch = manager.store.launch("agent-a")
@@ -134,8 +144,8 @@ def test_spawn_records_a_launch_and_an_audit_row(tmp_path: Path) -> None:
 
 def test_a_replayed_final_action_is_a_no_op_with_the_original_detail(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime())
-    first = manager.act("agent-a", "spawn", "first", actor="evans")
-    again = manager.act("agent-a", "spawn", "first", actor="evans", action_id=first)
+    first = manager.act("agent-a", "spawn", "first", actor="evans", actor_source="terminal")
+    again = manager.act("agent-a", "spawn", "first", actor="evans", actor_source="terminal", action_id=first)
     assert again == first
     assert len(manager.store.actions()) == 1
     assert manager.action(again).said == "spawned agent-a at 10.89.0.42"
@@ -143,9 +153,9 @@ def test_a_replayed_final_action_is_a_no_op_with_the_original_detail(tmp_path: P
 
 def test_a_replay_key_cannot_be_reused_for_another_handle_or_verb(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime())
-    first = manager.act("agent-a", "spawn", "first", actor="evans")
-    with pytest.raises(CoreRefusal) as caught:
-        manager.act("agent-b", "spawn", "first", actor="evans", action_id=first)
+    first = manager.act("agent-a", "spawn", "first", actor="evans", actor_source="terminal")
+    with pytest.raises(CoreRefusalError) as caught:
+        manager.act("agent-b", "spawn", "first", actor="evans", actor_source="terminal", action_id=first)
     assert "belongs to (agent-a, spawn)" in str(caught.value)
 
 
@@ -154,8 +164,8 @@ def test_two_concurrent_spawns_make_one_pod_and_one_refusal(tmp_path: Path) -> N
     queued: list[object] = []
     runtime = RecordingRuntime()
     manager = _manager(tmp_path, runtime, executor=queued.append)
-    first = manager.act("agent-a", "spawn", "first", actor="evans")
-    second = manager.act("agent-a", "spawn", "again", actor="evans")
+    first = manager.act("agent-a", "spawn", "first", actor="evans", actor_source="terminal")
+    second = manager.act("agent-a", "spawn", "again", actor="evans", actor_source="terminal")
     assert manager.action(first).state == "pending"
     duplicate = manager.action(second)
     assert duplicate.state == "refused"
@@ -171,7 +181,7 @@ def test_freeze_uses_the_agent_handshake_never_a_signal(tmp_path: Path) -> None:
     runtime = RecordingRuntime(facts={"agent-a": _alive()})
     control = RecordingControl(runtime)
     manager = _manager(tmp_path, runtime, agent_control=control)
-    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans", actor_source="terminal"))
     assert record.state == "succeeded"
     assert control.calls == ["standdown:agent-a"]
     assert manager.store.launch("agent-a")["ending"] == "standdown"
@@ -183,7 +193,7 @@ def test_a_stand_down_that_never_completes_is_timeout_not_failed(tmp_path: Path)
     runtime = RecordingRuntime(facts={"agent-a": _alive()})
     manager = _manager(tmp_path, runtime, agent_control=StubbornControl(), deadline=0.05,
                        sleep=lambda _s: None)
-    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans", actor_source="terminal"))
     assert record.state == "timeout"
     assert "outcome is unknown" in record.said
     # the pod is still there and no credential was revoked on a guess
@@ -202,13 +212,13 @@ def test_destroy_revokes_before_it_removes_and_names_a_partial_failure(tmp_path:
     row, _minted = manager.ledger.issue(adapter, "agent-a", "generic-token", boot_id="b1",
                                         launch_ref="b1:agent-a")
     # make removal fail: if revocation had not already run, the row would stay open
-    from babo.office.runtime import RuntimeUnavailable
+    from babo.office.runtime import RuntimeUnavailableError
 
     def _gone(name: str) -> None:
-        raise RuntimeUnavailable("runtime gone")
+        raise RuntimeUnavailableError("runtime gone")
 
     runtime.remove = _gone  # type: ignore[method-assign]
-    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans"))
+    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans", actor_source="terminal"))
     assert record.state == "failed"
     assert "did not remove the pod" in record.said
     assert manager.store.get_credential(row.id).state == "open"  # revoke tried, failed honestly
@@ -223,7 +233,7 @@ def test_destroy_success_revokes_credentials_and_writes_one_teardown_row(tmp_pat
     row, minted = manager.ledger.issue(file_adapter, "agent-a", "ssh-key", boot_id="b1",
                                        launch_ref="b1:agent-a")
     assert Path(row.locator[len("file:"):]).read_text().strip() == minted.secret
-    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans"))
+    record = manager.action(manager.act("agent-a", "destroy", "end it", actor="evans", actor_source="terminal"))
     assert record.state == "succeeded"
     assert manager.store.get_credential(row.id).state == "revoked"
     assert not Path(row.locator[len("file:"):]).exists()
@@ -294,7 +304,7 @@ def test_a_stand_down_the_core_released_does_not_borrow_the_agents_ending(tmp_pa
     runtime = RecordingRuntime(facts={"agent-a": _alive()})
     manager = _manager(tmp_path, runtime, agent_control=RecordingControl(runtime),
                        executor=lambda fn: fn())
-    manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans", actor_source="terminal"))
     (agent,) = manager.agents()
     assert agent.state == "frozen"
     assert agent.provenance["ended_reason"] == "standdown"
@@ -316,10 +326,15 @@ def test_an_unreadable_runtime_during_the_wait_is_not_reported_as_still_present(
 
     manager = _manager(tmp_path, runtime, agent_control=GoesDark(), deadline=0.05,
                        sleep=lambda _s: None)
-    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans"))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans",
+                                        actor_source="terminal"))
     # F-8: no verdict arrived, so the word is `timeout`; `failed` would mean it ran and broke.
     assert record.state == "timeout"
     assert "could not be read" in record.said and "still present" not in record.said
+    # ... and it got there by polling to the deadline, not by settling on the first
+    # failed read: an unreadable runtime is not a verdict (F-8's clock note).
+    inspects = [call for call in runtime.calls if call[0] == "inspect"]
+    assert len(inspects) >= 2
 
 
 def test_an_unknown_verdict_word_is_refused_not_coerced(tmp_path: Path) -> None:
@@ -342,7 +357,7 @@ def test_the_decision_table_is_pure_and_names_the_handle(tmp_path: Path) -> None
 
 def test_unknown_action_id_is_not_found_not_a_synthesised_failure(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime())
-    with pytest.raises(UnknownAction):
+    with pytest.raises(UnknownActionError):
         manager.action("nope")
 
 

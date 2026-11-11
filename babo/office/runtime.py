@@ -10,7 +10,7 @@ crosses that boundary (R10).
 
 **Absence and unreadability are different answers (O-05).**
 ``inspect_container`` / ``inspect_network`` return ``None`` when the runtime
-*answered* that the thing is not there, and raise :class:`RuntimeUnavailable`
+*answered* that the thing is not there, and raise :class:`RuntimeUnavailableError`
 when the runtime could not be read at all. A caller may not catch that error and
 continue as if it were an absence; a sweep that cannot read must skip and audit.
 
@@ -28,11 +28,11 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol, runtime_checkable
 
 
-class RuntimeUnavailable(RuntimeError):
+class RuntimeUnavailableError(RuntimeError):
     """The runtime could not be read. Never to be treated as an absent thing."""
 
 
-class ControlUnavailable(RuntimeError):
+class ControlUnavailableError(RuntimeError):
     """No agent-control port is wired, so a stand-down cannot be requested (L-06)."""
 
 
@@ -115,13 +115,13 @@ class UnwiredAgentControl:
     """The default port: honest, and it refuses rather than pretending."""
 
     def request_standdown(self, handle: str) -> None:
-        raise ControlUnavailable(
+        raise ControlUnavailableError(
             f"no stand-down handshake is configured for {handle}; refusing to kill the pod "
             "(a freeze preserves work, L-06)"
         )
 
     def request_rescue(self, handle: str) -> None:
-        raise ControlUnavailable(
+        raise ControlUnavailableError(
             f"no rescue handshake is configured for {handle}; refusing to tear the pod down blind"
         )
 
@@ -144,11 +144,11 @@ class PodmanRuntime:
         try:
             done = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout, check=False)
         except FileNotFoundError as exc:
-            raise RuntimeUnavailable(f"podman is not installed ({what})") from exc
+            raise RuntimeUnavailableError(f"podman is not installed ({what})") from exc
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeUnavailable(f"podman {what} timed out") from exc
+            raise RuntimeUnavailableError(f"podman {what} timed out") from exc
         if done.returncode != 0:
-            raise RuntimeUnavailable(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
+            raise RuntimeUnavailableError(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
         return done.stdout
 
     def _call_maybe_absent(self, *args: str, what: str) -> str | None:
@@ -156,15 +156,15 @@ class PodmanRuntime:
         try:
             done = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout, check=False)
         except FileNotFoundError as exc:
-            raise RuntimeUnavailable(f"podman is not installed ({what})") from exc
+            raise RuntimeUnavailableError(f"podman is not installed ({what})") from exc
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeUnavailable(f"podman {what} timed out") from exc
+            raise RuntimeUnavailableError(f"podman {what} timed out") from exc
         if done.returncode == 0:
             return done.stdout
         text = (done.stderr or "").lower()
         if any(marker in text for marker in self.ABSENT):
             return None
-        raise RuntimeUnavailable(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
+        raise RuntimeUnavailableError(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
 
     # -- reads ----------------------------------------------------------
     def inspect_container(self, name: str) -> ContainerFacts | None:
@@ -212,7 +212,7 @@ class PodmanRuntime:
         self._call(*args, what="run")
         found = self.inspect_container(spec.name)
         if found is None:  # pragma: no cover - the runtime said it ran
-            raise RuntimeUnavailable(f"container {spec.name} vanished right after run")
+            raise RuntimeUnavailableError(f"container {spec.name} vanished right after run")
         return found
 
     def remove(self, name: str) -> None:

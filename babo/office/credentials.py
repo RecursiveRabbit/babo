@@ -40,11 +40,11 @@ REASONS = ("teardown", "orphan", "relaunch", "boot-reconcile")
 _VALUE_SHAPED = re.compile(r"(?i)(value|secret|password|passwd|private_key|key_material)")
 
 
-class LedgerRefusal(RuntimeError):
+class LedgerRefusalError(RuntimeError):
     """The ledger declined before minting. Detail names what made it impossible."""
 
 
-class MintFailed(RuntimeError):
+class MintFailedError(RuntimeError):
     """The adapter's mint did not succeed. The row is `failed`, never `open` (D-4d)."""
 
 
@@ -167,7 +167,7 @@ class AdapterRegistry:
 
     def register(self, adapter: Adapter) -> None:
         if adapter.prefix not in self.PREFIXES:
-            raise LedgerRefusal(
+            raise LedgerRefusalError(
                 f"adapter prefix {adapter.prefix!r} is not one of the five approved handles"
             )
         # D-4(a): an adapter that cannot derive a deterministic locator is not
@@ -175,12 +175,12 @@ class AdapterRegistry:
         probe = adapter.locator("probe-instance", "ssh-key")
         again = adapter.locator("probe-instance", "ssh-key")
         if not probe or probe != again:
-            raise LedgerRefusal(
+            raise LedgerRefusalError(
                 f"adapter {adapter.prefix!r} cannot derive a deterministic locator from "
                 "(instance, scope); it is not approved"
             )
         if _VALUE_SHAPED.search(probe):
-            raise LedgerRefusal(f"adapter {adapter.prefix!r} derives a value-shaped locator")
+            raise LedgerRefusalError(f"adapter {adapter.prefix!r} derives a value-shaped locator")
         self._by_prefix[adapter.prefix] = adapter
 
     def for_handle(self, handle: str) -> Adapter | None:
@@ -203,14 +203,14 @@ class CredentialLedger:
               ) -> tuple[CredentialRecord, Minted]:
         for name in extra:
             if _VALUE_SHAPED.search(name):
-                raise LedgerRefusal(
+                raise LedgerRefusalError(
                     f"refusing an issue request carrying {name!r}: the ledger has no value field"
                 )
-            raise LedgerRefusal(f"unknown issue field {name!r}")
+            raise LedgerRefusalError(f"unknown issue field {name!r}")
         if scope not in SCOPES:
-            raise LedgerRefusal(f"unknown credential scope {scope!r}; it is one of {', '.join(SCOPES)}")
+            raise LedgerRefusalError(f"unknown credential scope {scope!r}; it is one of {', '.join(SCOPES)}")
         if adapter.prefix not in AdapterRegistry.PREFIXES:
-            raise LedgerRefusal(f"unapproved adapter {adapter.prefix!r}")
+            raise LedgerRefusalError(f"unapproved adapter {adapter.prefix!r}")
 
         # The locator is derived BEFORE the mint and is the only thing the row
         # records about the secret's address.
@@ -223,18 +223,18 @@ class CredentialLedger:
         try:
             self.store.insert_credential(row)
         except StoreError as exc:  # collision: not deterministic per (instance, scope)
-            raise LedgerRefusal(str(exc)) from exc
+            raise LedgerRefusalError(str(exc)) from exc
 
         try:
             minted = adapter.mint(instance, scope)
         except Exception as exc:
             # D-4(d): no secret is assumed to exist unless the adapter confirms it.
             self.store.fail_credential(row.id, note=f"{type(exc).__name__}: {exc}"[:300])
-            raise MintFailed(f"{type(exc).__name__}: {exc}") from exc
+            raise MintFailedError(f"{type(exc).__name__}: {exc}") from exc
 
         if adapter.locator(instance, scope) != locator:  # pragma: no cover - race or a lying adapter
             self.store.fail_credential(row.id, note="adapter changed its locator between derive and mint")
-            raise LedgerRefusal("adapter changed its locator between derive and mint")
+            raise LedgerRefusalError("adapter changed its locator between derive and mint")
 
         promoted = self.store.promote_credential(row.id, locator=locator, at=self._clock())
         if minted.unrevocable:
@@ -247,7 +247,7 @@ class CredentialLedger:
     # -- revoke (C-02 … C-05) -------------------------------------------
     def revoke(self, credential_id: str, reason: str) -> RevokeOutcome:
         if reason not in REASONS:
-            raise LedgerRefusal(f"unknown revoke reason {reason!r}; it is one of {', '.join(REASONS)}")
+            raise LedgerRefusalError(f"unknown revoke reason {reason!r}; it is one of {', '.join(REASONS)}")
         row = self.store.get_credential(credential_id)
         if row is None:
             return RevokeOutcome(False, f"no such credential: {credential_id}")

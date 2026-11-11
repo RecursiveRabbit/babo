@@ -21,9 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-# The closed sets (ledger L-02; api.py holds the same words).
-ACTION_STATES = ("pending", "running", "succeeded", "failed", "refused", "timeout")
-TERMINAL = ("succeeded", "failed", "refused", "timeout")
+from babo.office.api import TERMINAL
+
+# The store's state set (ledger L-02). The terminal words are the interface's,
+# not a second copy: api.py is the single source (Bomu's slice lint).
+ACTION_STATES = ("pending", "running", *TERMINAL)
 
 # The preserved event vocabulary, plus REFUSED: the model had no actor gate and
 # so no audit row for a refusal; A-03/A-05 require one. Named here, not invented
@@ -115,7 +117,7 @@ CREATE TABLE IF NOT EXISTS credentials (
     note           TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS credentials_by_instance ON credentials (instance, state);
-CREATE UNIQUE INDEX IF NOT EXISTS credentials_one_live ON credentials (instance, scope)
+CREATE UNIQUE INDEX IF NOT EXISTS credentials_one_live_locator ON credentials (locator)
     WHERE state IN ('pending', 'open');
 """
 
@@ -200,6 +202,14 @@ class Store:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_SCHEMA)
+            # Migration: the live-row uniqueness moved from (instance, scope) to
+            # the locator itself. The locator is the thing the store can verify
+            # was derived; a scope-ignoring adapter must collide here, not slip by.
+            self._conn.execute("DROP INDEX IF EXISTS credentials_one_live")
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS credentials_one_live_locator ON credentials"
+                " (locator) WHERE state IN ('pending', 'open')"
+            )
             self._add_column_if_missing("actions", "actor_source", "TEXT NOT NULL DEFAULT ''")
             self._add_column_if_missing("audit", "actor_source", "TEXT NOT NULL DEFAULT ''")
 
@@ -457,7 +467,9 @@ class Store:
             except sqlite3.IntegrityError as exc:
                 self._rollback()
                 raise StoreError(
-                    f"a live credential already exists for ({record.instance}, {record.scope})"
+                    "a live credential already holds this locator "
+                    f"({record.instance}, {record.scope}); a collision proves the locator is "
+                    "not deterministic per (instance, scope)"
                 ) from exc
             except Exception:
                 self._rollback()

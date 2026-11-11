@@ -13,8 +13,8 @@ from babo.office.credentials import (
     AdapterRegistry,
     CredentialLedger,
     FileAdapter,
-    LedgerRefusal,
-    MintFailed,
+    LedgerRefusalError,
+    MintFailedError,
     Minted,
     RevokeOutcome,
     TokenAdapter,
@@ -58,7 +58,7 @@ def test_an_adapter_that_cannot_derive_a_deterministic_locator_is_not_approved(
 
     flaky = TokenAdapter("valley:token:", unstable, lambda i, s: Minted(secret="x"),
                          lambda h: RevokeOutcome(True))
-    with pytest.raises(LedgerRefusal) as caught:
+    with pytest.raises(LedgerRefusalError) as caught:
         registry.register(flaky)
     assert "cannot derive a deterministic locator" in str(caught.value)
 
@@ -98,7 +98,7 @@ def test_mint_failure_moves_the_row_to_failed_never_open(tmp_path: Path) -> None
                              lambda i, s: (_ for _ in ()).throw(RuntimeError("mint refused")),
                              lambda h: RevokeOutcome(True))
     ledger.registry.register(exploding)
-    with pytest.raises(MintFailed):
+    with pytest.raises(MintFailedError):
         ledger.issue(exploding, "agent-a", "generic-token", boot_id="b1", launch_ref="b1:agent-a")
     (row,) = ledger.store.credentials(instance="agent-a")
     assert row.state == "failed"
@@ -216,19 +216,52 @@ def test_an_unreadable_inventory_revokes_nothing_and_says_so(tmp_path: Path) -> 
     assert "nothing revoked" in audit[0].detail
 
 
+def test_a_scope_ignoring_adapter_is_caught_by_the_locator_index(tmp_path: Path) -> None:
+    # D-4(c) with the guard moved to the locator: an adapter that ignores scope
+    # passes the determinism probe (same scope twice is stable) and is still
+    # refused, because the *index* on live locators is what catches it.
+    ledger, _adapter = _ledger(tmp_path)
+    scopeless = TokenAdapter(
+        "generic:",
+        lambda instance, scope: f"generic:{instance}",  # scope ignored on purpose
+        lambda i, s: Minted(secret="x"),
+        lambda h: RevokeOutcome(True),
+    )
+    ledger.registry.register(scopeless)  # registration alone cannot see this defect
+    ledger.issue(scopeless, "agent-a", "ssh-key", boot_id="b1", launch_ref="b1:a")
+    with pytest.raises(LedgerRefusalError) as caught:
+        ledger.issue(scopeless, "agent-a", "generic-token", boot_id="b1", launch_ref="b1:a")
+    assert "locator" in str(caught.value)
+    assert len(ledger.store.credentials(instance="agent-a")) == 1
+
+    # The index itself, without the ledger in the way: two live rows with the
+    # same locator and different (instance, scope) are refused by the store.
+    store = _store(tmp_path / "direct")
+    shared = "generic:collision"
+    store.insert_credential(CredentialRecord(
+        id="c1", instance="agent-b", scope="ssh-key", boot_id="b1", launch_ref="b1:b",
+        locator=shared, issued_at=NOW(), expires_at=None, state="open", unrevocable=False,
+    ))
+    with pytest.raises(StoreError):
+        store.insert_credential(CredentialRecord(
+            id="c2", instance="agent-c", scope="generic-token", boot_id="b1", launch_ref="b1:c",
+            locator=shared, issued_at=NOW(), expires_at=None, state="open", unrevocable=False,
+        ))
+
+
 def test_a_second_live_row_for_the_same_instance_and_scope_is_refused(tmp_path: Path) -> None:
     # D-4(c): a collision proves the locator is not deterministic per (instance, scope).
     ledger, adapter = _ledger(tmp_path)
     ledger.issue(adapter, "agent-a", "ssh-key", boot_id="b1", launch_ref="b1:a")
-    with pytest.raises(LedgerRefusal) as caught:
+    with pytest.raises(LedgerRefusalError) as caught:
         ledger.issue(adapter, "agent-a", "ssh-key", boot_id="b1", launch_ref="b1:a")
-    assert "already exists" in str(caught.value)
+    assert "live credential already holds this locator" in str(caught.value)
 
 
 def test_an_issue_request_carrying_a_value_shaped_field_is_refused(tmp_path: Path) -> None:
     # C-01: the row has no place for a secret, and the API must not grow one.
     ledger, adapter = _ledger(tmp_path)
-    with pytest.raises(LedgerRefusal) as caught:
+    with pytest.raises(LedgerRefusalError) as caught:
         ledger.issue(adapter, "agent-a", "ssh-key", boot_id="b1", launch_ref="b1:a", secret="x")
     assert "value field" in str(caught.value)
     assert ledger.store.credentials(instance="agent-a") == []
@@ -236,11 +269,11 @@ def test_an_issue_request_carrying_a_value_shaped_field_is_refused(tmp_path: Pat
 
 def test_unknown_scopes_and_reasons_are_refused_with_the_allowed_set(tmp_path: Path) -> None:
     ledger, adapter = _ledger(tmp_path)
-    with pytest.raises(LedgerRefusal) as scope:
+    with pytest.raises(LedgerRefusalError) as scope:
         ledger.issue(adapter, "agent-a", "admin", boot_id="b1", launch_ref="b1:a")
     assert "forgejo-user" in str(scope.value)
     row, _ = ledger.issue(adapter, "agent-a", "ssh-key", boot_id="b1", launch_ref="b1:a")
-    with pytest.raises(LedgerRefusal) as reason:
+    with pytest.raises(LedgerRefusalError) as reason:
         ledger.revoke(row.id, "because")
     assert "boot-reconcile" in str(reason.value)
 
@@ -252,7 +285,7 @@ def test_a_never_minted_row_is_skipped_not_counted_as_revoked(tmp_path: Path) ->
                              lambda i, s: (_ for _ in ()).throw(RuntimeError("no mint")),
                              lambda h: RevokeOutcome(True))
     ledger.registry.register(exploding)
-    with pytest.raises(MintFailed):
+    with pytest.raises(MintFailedError):
         ledger.issue(exploding, "agent-a", "generic-token", boot_id="b1", launch_ref="b1:a")
     (row,) = ledger.store.credentials(instance="agent-a")
     outcome = ledger.revoke(row.id, "teardown")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from babo.office.runtime import AgentControl, ContainerFacts, LaunchSpec, RuntimeUnavailable
+from babo.office.runtime import AgentControl, ContainerFacts, LaunchSpec, RuntimeUnavailableError
 
 
 @dataclass
@@ -15,7 +15,7 @@ class RecordingRuntime:
 
     def _check(self) -> None:
         if self.unavailable:
-            raise RuntimeUnavailable(self.unavailable)
+            raise RuntimeUnavailableError(self.unavailable)
 
     def inspect_container(self, name: str) -> ContainerFacts | None:
         self.calls.append(("inspect", name))
