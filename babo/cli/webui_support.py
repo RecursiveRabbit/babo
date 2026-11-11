@@ -400,10 +400,19 @@ def _ensure_local_webui_channel(
     model = WebSocketConfig.model_validate(current)
     changed = False
 
+    # A listener that trusts an explicit network source is a deliberate deployment
+    # (a pod behind a WireGuard source rule). It must keep the address and port it
+    # was rendered with, and it must NOT be handed a static token route — the
+    # trusted peer is the issuance condition, and a generated token_issue_secret
+    # would be a second door that the listener refuses to start with.
+    trusted = bool(model.trusted_sources)
     needs_enable = not model.enabled
-    needs_port = port is not None and model.port != port
-    needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
-    if not needs_enable and not needs_port and not needs_secret:
+    needs_port = (not trusted) and port is not None and model.port != port
+    needs_secret = (not trusted) and not model.token_issue_secret.strip() and not model.token.strip()
+    # A token is always required for the WebUI, trusted listener or not: the session
+    # comes from /webui/bootstrap, and the handshake must present it.
+    needs_token_required = not model.websocket_requires_token
+    if not needs_enable and not needs_port and not needs_secret and not needs_token_required:
         return False
 
     _confirm_webui_action("Set up WebUI?", yes=yes)
@@ -411,7 +420,7 @@ def _ensure_local_webui_channel(
     if not model.enabled:
         model.enabled = True
         changed = True
-    if model.host != "127.0.0.1":
+    if (not trusted) and model.host != "127.0.0.1":
         model.host = "127.0.0.1"
         changed = True
     if port is not None and model.port != port:

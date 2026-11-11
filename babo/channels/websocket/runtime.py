@@ -185,6 +185,33 @@ class WebSocketConfig(Base):
     token: str = ""
     token_issue_path: str = ""
     token_issue_secret: str = ""
+    # Addresses this listener trusts to obtain a WebUI session when the browser is
+    # not on loopback (a pod behind a WireGuard source rule, for example). Exact
+    # IPv4 /32 match only — no prefix parsing; empty means loopback-only, as before.
+    trusted_sources: list[str] = Field(default_factory=list)
+
+    @field_validator("trusted_sources")
+    @classmethod
+    def validate_trusted_sources(cls, values: list[str]) -> list[str]:
+        """Exact IPv4 /32 addresses only.
+
+        No prefix parsing on purpose: a half-implemented CIDR parser turns one
+        typo into a whole subnet of trusted operators. Anything that is not a
+        dotted-quad IPv4 address with /32 fails startup, naming the value.
+        """
+        normalized: list[str] = []
+        for raw in values:
+            value = str(raw).strip()
+            if not value.endswith("/32"):
+                raise ValueError(f"trusted source {value!r} must be an exact IPv4 address written as a.b.c.d/32")
+            try:
+                address = ipaddress.IPv4Address(value[:-3])
+            except ValueError as exc:
+                raise ValueError(f"trusted source {value!r} is not an IPv4 address") from exc
+            if address.is_unspecified or address.is_multicast or address.is_reserved:
+                raise ValueError(f"trusted source {value!r} is not a usable peer address")
+            normalized.append(f"{address}/32")
+        return normalized
     trusted_proxy_auth: TrustedProxyAuthConfig | None = None
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
@@ -356,8 +383,20 @@ class WebSocketChannel(BaseChannel):
     ):
         if isinstance(config, dict):
             config = WebSocketConfig.model_validate(config)
+        if config.trusted_sources and (config.token_issue_path or config.token_issue_secret):
+            # A listener that trusts a network peer must not also hand out tokens
+            # over a static route: that would be a second, unwatched door. Fail at
+            # startup, naming the variable, rather than serving both.
+            raise ValueError(
+                "token_issue_path/token_issue_secret must be unset when trusted_sources is set "
+                "(a static token route is a second issuance path next to the WireGuard-sourced one)"
+            )
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
+        self.logger.info(
+            "WebUI session sources: {}",
+            ", ".join(config.trusted_sources) if config.trusted_sources else "loopback only",
+        )
         # chat_id -> connections subscribed to it (fan-out target).
         self._subs: dict[str, set[ServerConnection]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).

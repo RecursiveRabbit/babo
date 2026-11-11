@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.console import Console
@@ -16,6 +16,7 @@ from babo.baton.town import BatonError, Town, now_iso
 if TYPE_CHECKING:
     from babo.baton.requests import SessionRequest
     from babo.config.schema import Config
+    from babo.office.api import OfficeManager
 
 app = typer.Typer(help="The Baton town: residents, memory, upkeep, review.", no_args_is_help=True)
 console = Console()
@@ -1693,3 +1694,213 @@ ALLOW_ALL_WARNING = """[bold yellow]Allow all: the Mayor's errands from this cha
 - Anyone who can talk to him in this chat, and anything he reads (web pages, messages), can lead to commands running.
 - Each request still runs in a resident's opencode session, and is recorded (Town › Review › Recently run).
 - Turn it off when you're done: babo allow-all <chat> --off"""
+
+
+# -- the office -------------------------------------------------------------
+office_app = typer.Typer(help="The office: projects with one lead and a crew, and the agents they run as.",
+                         invoke_without_command=True)
+app.add_typer(office_app, name="office")
+
+
+def _office_core(_cfg: Config) -> OfficeManager:
+    """The native manager core (babo/office/core.py). Until it lands, the CLI says so."""
+    from babo.office.api import manager_for
+
+    return manager_for(_cfg)
+
+
+@office_app.callback()
+def office_board(ctx: typer.Context, config: str | None = _CONFIG_OPT) -> None:
+    """The office as the Manager reports it (the same view as the Office page)."""
+    from babo.office import control
+
+    if ctx.invoked_subcommand:
+        return
+    try:
+        t, cfg = _town(config)
+        view = control.office_view(t, _office_core(cfg))  # type: ignore[arg-type]
+    except BatonError as exc:
+        _fail(exc)
+        return
+    backend = cast(dict[str, object], view["manager"])
+    if not backend.get("available"):
+        console.print(f"[yellow]The Manager can't be read: {backend.get('said')}[/yellow]")
+    for project in cast(list[dict[str, object]], view["projects"]):
+        console.print(f"\n[bold]{project['title']}[/bold] ({project['slug']}) — {project['open_tickets']} open")
+        console.print(f"  lead: {project['lead'] or '(unset)'}   crew: {', '.join(cast(list[str], project['crew'])) or '(none)'}")
+        for agent in cast(list[dict[str, object]], view["agents"]):
+            if agent.get("project") != project["slug"]:
+                continue
+            role = f" ({agent['role']})" if agent.get("role") else ""
+            console.print(f"  - {agent['handle']}{role}: {agent['status']}"
+                          + (f" — {agent['said']}" if agent.get("said") else ""))
+    loose = [a for a in cast(list[dict[str, object]], view["agents"]) if not a.get("project")]
+    for agent in loose:
+        console.print(f"  - {agent['handle']}: {agent['status']}" + (f" — {agent['said']}" if agent.get("said") else ""))
+
+
+def _office_verb(verb: str, handle: str, reason: str, config: str | None,
+                 actor_name: str = "") -> None:
+    from babo.office import control
+    from babo.office.actors import terminal_actor
+
+    try:
+        t, cfg = _town(config)
+        # The terminal's actor is the OS user running this command (or --actor),
+        # never a constant: if it can't be determined, the action is refused.
+        actor = terminal_actor(actor_name)
+        op = control.perform_sync(_office_core(cfg), handle, verb, reason,
+                                  store=control.AgentStore(t), actor=actor)  # type: ignore[arg-type]
+    except BatonError as exc:
+        _fail(exc)
+        return
+    console.print(f"{op.state}: {op.said}" if op.said else op.state)
+    if op.state != "succeeded":
+        raise typer.Exit(1)
+
+
+@office_app.command("wake")
+def office_wake(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
+                config: str | None = _CONFIG_OPT) -> None:
+    """Wake a frozen agent (the core's own verb)."""
+    _office_verb("wake", handle, reason or "wake", config, actor)
+
+
+@office_app.command("freeze")
+def office_freeze(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                  actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
+                  config: str | None = _CONFIG_OPT) -> None:
+    """Freeze an agent: it stands down and saves its work, then its pod is released. The work survives; the process does not."""
+    _office_verb("freeze", handle, reason or "freeze", config, actor)
+
+
+@office_app.command("spawn")
+def office_spawn(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                 actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
+                 config: str | None = _CONFIG_OPT) -> None:
+    """Bring one agent up for the first time (the core decides whether it may)."""
+    _office_verb("spawn", handle, reason or "spawn", config, actor)
+
+
+@office_app.command("rescue")
+def office_rescue(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                  actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
+                  config: str | None = _CONFIG_OPT) -> None:
+    """Preserve the work, replace the pod and its credentials (the core's own semantics)."""
+    _office_verb("rescue", handle, reason or "rescue", config, actor)
+
+
+@office_app.command("destroy")
+def office_destroy(handle: str = typer.Argument(...), reason: str = typer.Option("", "--reason"),
+                   actor: str = typer.Option("", "--actor", help="Who is asking (default: your OS user)"),
+                   config: str | None = _CONFIG_OPT) -> None:
+    """Tear the agent down and revoke what it holds. The work is not preserved."""
+    _office_verb("destroy", handle, reason or "destroy", config, actor)
+
+
+@office_app.command("record")
+def office_record(handle: str = typer.Argument(...), resident: str = typer.Option(..., "--resident", "-r"),
+                  project: str = typer.Option("", "--project", "-p"),
+                  desired: str = typer.Option("running", "--desired"), config: str | None = _CONFIG_OPT) -> None:
+    """Record what you want for one agent (desired state only; the Manager still decides)."""
+    from babo.office import control
+
+    try:
+        t, _cfg = _town(config)
+        console.print(control.record_agent(t, {"handle": handle, "resident": resident, "project": project,
+                                               "desired": desired})["message"])
+    except BatonError as exc:
+        _fail(exc)
+
+
+@office_app.command("crew")
+def office_crew(project: str = typer.Argument(...), lead: str = typer.Option("", "--lead"),
+                crew: str = typer.Option("", "--crew", help="Comma-separated agent handles"),
+                config: str | None = _CONFIG_OPT) -> None:
+    """Set a project's one lead and its crew."""
+    from babo.office import control
+
+    try:
+        t, _cfg = _town(config)
+        said = control.change_crew(t, {"project": project, "lead": lead,
+                                       "crew": [h.strip() for h in crew.split(",") if h.strip()]})
+        console.print(said["message"])
+    except BatonError as exc:
+        _fail(exc)
+
+
+# -- the web interface's operator verbs -------------------------------------
+ui_app = typer.Typer(help="The web interface's operator verbs (the terminal half of the UI).",
+                     invoke_without_command=True)
+app.add_typer(ui_app, name="ui")
+
+
+def _webui_base(cfg: Config) -> str:
+    """The WebUI listener, not the gateway's health server.
+
+    They are different processes-in-one: the SPA, /api and /webui/bootstrap are
+    served by the websocket channel (channels.websocket.host/port); gateway.host/
+    port is the lightweight /health server. Pointing this at gateway.* would make
+    `babo ui revoke-sessions` POST at a health endpoint and fail confusingly —
+    in a pod, where the two ports differ (8843 UI, 18790 health), always.
+    """
+    channel = cast(dict[str, Any], getattr(cfg.channels, "websocket", None) or {})
+    host = str(channel.get("host") or "127.0.0.1")
+    port = int(channel.get("port") or 8765)
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"  # we are on this machine; talk to it directly
+    return f"http://{host}:{port}"
+
+
+def _post_json(url: str, token: str = "", payload: dict[str, Any] | None = None) -> tuple[int, str]:
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = _json.dumps(payload or {}).encode()
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", "replace") if exc.fp else ""
+
+
+@ui_app.callback()
+def ui_root(ctx: typer.Context) -> None:
+    """Operator verbs for the web interface. Run one."""
+    if ctx.invoked_subcommand:
+        return
+    console.print("Usage: babo ui revoke-sessions   (sign out every browser session)")
+
+
+@ui_app.command("revoke-sessions")
+def ui_revoke_sessions(config: str | None = _CONFIG_OPT) -> None:
+    """Sign out every browser session: the token store is in memory, so this and a
+    restart are the two operator revocations. Running inside the pod, loopback
+    bootstrap issues the token this call needs — no password, no static secret."""
+    import json as _json
+
+    cfg = _config(config)
+    base = _webui_base(cfg)
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{base}/webui/bootstrap", timeout=10) as response:
+            token = str(_json.loads(response.read().decode()).get("api_token") or "")
+    except Exception as exc:  # pragma: no cover - a gateway that isn't there
+        _fail(BatonError(f"couldn't reach the gateway at {base}: {exc}"))
+        return
+    if not token:
+        _fail(BatonError("the gateway issued no API token from loopback; is token_issue_path set?"))
+        return
+    status, body = _post_json(f"{base}/api/webui/tokens/revoke", token)
+    if status != 200:
+        _fail(BatonError(f"revoke failed ({status}): {body.strip()[:200]}"))
+        return
+    said = _json.loads(body).get("revoked", 0) if body.strip() else 0
+    console.print(f"Signed out every browser session ({said} token(s) cleared).")

@@ -304,6 +304,36 @@ def is_local_browser_request(connection: Any, headers: Any) -> bool:
     return _all_forwarded_values_are_loopback(headers)
 
 
+def peer_host(connection: Any) -> str:
+    """The socket peer's address, normalized (IPv4-mapped IPv6 unwrapped). Never a header."""
+    addr: object = getattr(connection, "remote_address", None)
+    candidate: object
+    if isinstance(addr, tuple):
+        parts = cast(tuple[object, ...], addr)
+        candidate = parts[0] if parts else ""
+    elif isinstance(addr, str):
+        candidate = addr
+    else:
+        return ""
+    if not isinstance(candidate, str):
+        return ""
+    host: str = candidate
+    return host[7:] if host.startswith("::ffff:") else host
+
+
+def is_trusted_source_request(connection: Any, trusted_sources: list[str] | tuple[str, ...]) -> bool:
+    """True when the socket peer is exactly one of the configured trusted sources.
+
+    Exact match on the peer address only. X-Forwarded-For and friends are never
+    consulted: they are client-controlled, and trusting them would make the
+    WireGuard boundary advisory.
+    """
+    host = peer_host(connection)
+    if not host:
+        return False
+    return any(entry.strip() == f"{host}/32" for entry in trusted_sources)
+
+
 def bearer_token(headers: Any) -> str | None:
     auth = headers.get("Authorization") or headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
