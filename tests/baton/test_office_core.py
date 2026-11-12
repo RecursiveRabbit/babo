@@ -61,7 +61,14 @@ def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) 
     manager = _manager(tmp_path, runtime)
     with pytest.raises(CoreRefusalError) as caught:
         manager.act("agent-a", "explode", "because", actor="evans", actor_source="terminal")
-    assert "it is one of spawn, wake, freeze, rescue, destroy, restart-ui" in str(caught.value)
+    # Exact equality, not a substring, and that is the whole point of the pin.
+    # `ACTIONS` is the union of the two doors, so a verb appended to the operator
+    # door prints *after* `restart-ui`: a substring assertion is still satisfied by
+    # the prefix and the test goes silent exactly when the vocabulary widens.
+    # Equality catches an append, a drop and a reordering, in either door.
+    assert str(caught.value) == (
+        "unknown action 'explode'; it is one of spawn, wake, freeze, rescue, destroy, restart-ui"
+    )
     assert manager.store.actions() == []
     assert runtime.calls == []
 

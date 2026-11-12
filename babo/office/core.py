@@ -319,10 +319,15 @@ class NativeManager:
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",
             actor_source: str = "", action_id: str | None = None) -> str:
         if action not in ACTIONS:
-            # L-01: refused before a row exists or a thread starts. The list is the
-            # closed set itself, so the sentence below can never name a verb as
-            # both known and unknown (bomu's L-10 acceptance (f)) and there is no
-            # second name for the vocabulary to drift against.
+            # L-01: refused before a row exists or a thread starts. The gate and
+            # `decide()`'s fallthrough read the same tuple now, so this sentence
+            # does **not** promise that a verb is never named as both known and
+            # unknown: any verb in `ACTIONS` that the table has no branch for would
+            # pass here and be called unknown further down, listing itself among the
+            # valid ones. What stops that is the partition test and the exact-sentence
+            # pin in `test_office_core`, not this check — a promise written in a
+            # comment is not a mechanism. (F8: the earlier text claimed the
+            # impossibility that deriving the tuple removed.)
             raise CoreRefusalError(
                 f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}"
             )
