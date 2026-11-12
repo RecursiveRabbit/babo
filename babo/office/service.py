@@ -16,6 +16,7 @@ without a socket.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
 
@@ -96,14 +97,98 @@ def peer_allowed(peer: str, allowed: tuple[str, ...]) -> bool:
     return any(entry == peer for entry in allowed)
 
 
+# The render's two door variables, in the render's own names. This module keeps no
+# address of its own: the pod's entrypoint resolves these, and a door whose address
+# is chosen here would answer to a source nobody rendered.
+RENDER_UI_SOURCES = "BABO_TRUSTED_SOURCES"          # the UI pod: the WebUI listener's only source
+RENDER_OPERATOR_SOURCES = "BABO_OPERATOR_SOURCES"   # the host's WG address: the operator door only
+
+
+class RenderIncompleteError(ValueError):
+    """The render did not declare a door, and this door has no honest default.
+
+    Raised at construction, not at the first refusal. A Manager that starts with
+    the operator door silently closed answers every host call with `403 not an
+    admitted door` — the same sentence a wrong principal gets. Two facts that read
+    identically in the only place a caller can see them are one fact, and that is
+    the one thing this door cannot afford.
+    """
+
+
+def _exact_source(entry: str, *, key: str) -> str:
+    """One declared source, as the exact string ``peer_allowed`` compares.
+
+    The pod's entrypoint already refuses anything but an exact IPv4 /32
+    (``trusted_ok``); this is the door's second reader of the same rule, and it is
+    deliberately narrow. A shorter prefix would not fail *open* here — the compare
+    is exact — it would fail *silently*: admitting nobody while the configuration
+    says a source was named. So a prefix, a hostname, a second spelling of one
+    address (``010.0.0.2``) and an address no caller can arrive from are refused
+    by name, rather than becoming a peer that matches nothing.
+    """
+    address = entry[:-3] if entry.endswith("/32") else entry
+    if "/" in address:
+        raise RenderIncompleteError(f"{key}: {entry!r} is a prefix, not an exact source")
+    octets = address.split(".")
+    if len(octets) != 4 or not all(
+            o.isascii() and o.isdigit() and str(int(o)) == o and int(o) <= 255 for o in octets):
+        raise RenderIncompleteError(f"{key}: {entry!r} is not an IPv4 address")
+    first = int(octets[0])
+    if first in (0, 127) or first >= 224:
+        raise RenderIncompleteError(f"{key}: {entry!r} is not a source a caller arrives from")
+    return address
+
+
+def _sources(declared: str | None, *, key: str) -> tuple[str, ...]:
+    """A rendered source list → the peer tuple. One or more, exact, no empty slots."""
+    if declared is None or not declared.strip():
+        raise RenderIncompleteError(f"{key} is not declared; the render owns this door's addresses")
+    entries = [piece.strip() for piece in declared.split(",")]
+    if not all(entries):
+        raise RenderIncompleteError(f"{key}: {declared!r} has an empty entry; that is not an address")
+    return tuple(_exact_source(entry, key=key) for entry in entries)
+
+
+def doors_from_render(render: Mapping[str, str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The two peer lists, read from the render and from nowhere else.
+
+    Both are required. `An unset door is a closed door` is the right rule for a
+    trust list whose absence the pod reports at start; it is the wrong rule here,
+    because this door's absence has no report — every host call would be a 403, and
+    a 403 is also what a stranger gets.
+    """
+    return (_sources(render.get(RENDER_UI_SOURCES), key=RENDER_UI_SOURCES),
+            _sources(render.get(RENDER_OPERATOR_SOURCES), key=RENDER_OPERATOR_SOURCES))
+
+
 @dataclass
 class ManagerService:
     core: OfficeManager
     ui_peers: tuple[str, ...]
     # The host-WG door's admitted addresses — the only callers `restart-ui`
     # answers. Both sets are required arguments and neither has a default: the
-    # render owns the addresses, and an unset door is a closed door.
+    # render owns the addresses, and a door built here with `()` is closed on
+    # purpose. `from_render` is the other direction — it refuses a door the render
+    # never declared rather than quietly handing back one of these.
     operator_peers: tuple[str, ...]
+
+    @classmethod
+    def from_render(cls, core: OfficeManager, *, render: Mapping[str, str]) -> ManagerService:
+        """Build the service from the render's declared doors — the only constructor.
+
+        Not a convenience over the dataclass: these two fields *are* the admission
+        lists, and until this existed no process built them, so `restart-ui`'s
+        host-WG admission was a code capability with no rendered entry. The UI
+        listener's trust and the operator door's admission are two facts with two
+        names; the render is where both are declared, and this is where they
+        arrive as peers.
+
+        The caller is the Manager process. That process does not exist yet, and the
+        listener that would front it is unassigned and unruled: this chooses no
+        address, binds nothing and claims no row.
+        """
+        ui_peers, operator_peers = doors_from_render(render)
+        return cls(core=core, ui_peers=ui_peers, operator_peers=operator_peers)
 
     # -- reads -----------------------------------------------------------
     def health(self) -> tuple[int, dict[str, Any]]:
