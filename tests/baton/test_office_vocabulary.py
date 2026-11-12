@@ -25,9 +25,14 @@ from collections import Counter
 import pytest
 
 from babo.office.api import ACTIONS, AGENT_ACTIONS, OPERATOR_ACTIONS, TERMINAL
-from babo.office.audit import ACTION_EVENTS
 from babo.office.audit import EVENTS as STORE_EVENTS
-from babo.office.core import EVENT_FALLBACK, EVENT_TABLE, _event
+from babo.office.core import (
+    ACTION_EVENTS,
+    EVENT_BASES,
+    EVENT_FALLBACK,
+    EVENT_TABLE,
+    _event,
+)
 
 # L-01's five, in order, plus L-10's amendment last.
 FROZEN = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
@@ -78,19 +83,39 @@ def test_every_verb_and_state_has_a_cell_that_produces_a_declared_word() -> None
 
 
 def test_the_event_vocabulary_is_closed_in_both_directions() -> None:
-    # pair -> word: nothing outside the declared set is produced.
-    # word -> pair: nothing declared is unreachable. One direction alone is how a
-    # dead word lives for a year, which is why both are asserted here.
-    assert set(EVENT_TABLE.values()) == set(ACTION_EVENTS)
-    assert {verb for verb, _state in EVENT_TABLE} == set(ACTIONS)
-    assert {state for _verb, state in EVENT_TABLE} == set(TERMINAL)
+    # Domain: generated from `ACTIONS x TERMINAL`, so a fifth terminal state
+    # arrives with its cells already present and no verb gets a missing column.
+    # Codomain: the table's own values, so no dead word and no missing word.
+    assert set(EVENT_TABLE) == {(verb, state) for verb in ACTIONS for state in TERMINAL}
+    assert set(EVENT_BASES) == set(ACTIONS)
+    assert ACTION_EVENTS == tuple(dict.fromkeys(EVENT_TABLE.values()))
+    assert len(ACTION_EVENTS) == len(set(ACTION_EVENTS))
 
 
-def test_the_action_vocabulary_is_part_of_the_store_vocabulary() -> None:
-    # `finish_action` writes these words into the same audit table whose
-    # vocabulary the store declares. A word here that is missing there would be a
-    # column the store's own list denies.
-    assert set(ACTION_EVENTS) <= set(STORE_EVENTS)
+def test_the_table_does_not_mint_a_dead_word() -> None:
+    # The shape this test exists for: enumerate `ACTIONS x TERMINAL` with suffixes
+    # *and* write the list down, and `("destroy", "failed")` being
+    # `TEARDOWN_PARTIAL` leaves `TEARDOWN_FAILED` in the vocabulary with no cell to
+    # produce it. The vocabulary is the table's values, so it cannot happen.
+    assert "TEARDOWN_FAILED" not in ACTION_EVENTS
+    assert "TEARDOWN_PARTIAL" in ACTION_EVENTS
+
+
+def test_the_new_words_are_exactly_this_landings_declaration() -> None:
+    # `EVENTS` is the preserved vocabulary (audit.py): what the column has been
+    # written with, including every wake row written before 2026-11-12, which says
+    # `SPAWN`. This landing changed what may be written *now*, and the delta is
+    # named here so a third list cannot appear by drift.
+    introduced = {
+        "SPAWN_TIMEOUT", "WAKE", "WAKE_FAILED", "WAKE_TIMEOUT",
+        "FREEZE_FAILED", "FREEZE_TIMEOUT", "RESCUE_FAILED", "RESCUE_TIMEOUT",
+        "TEARDOWN_TIMEOUT", "UI_RESTART_TIMEOUT",
+    }
+    preserved_only = {
+        "FREEZE_FALLBACK_RESCUE", "CREDENTIAL_REVOKE_PARTIAL", "CREDENTIAL_RECONCILE",
+    }
+    assert set(ACTION_EVENTS) - set(STORE_EVENTS) == introduced
+    assert set(STORE_EVENTS) - set(ACTION_EVENTS) == preserved_only
 
 
 def test_the_fallback_is_not_a_word_in_the_vocabulary() -> None:

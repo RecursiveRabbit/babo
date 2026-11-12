@@ -748,69 +748,73 @@ def _asked(actor: str, source: str) -> str:
     return f"asked by {actor} via {source}" if source else f"asked by {actor}"
 
 
-# The one projection from (verb, state) to an event word (F13).
+# The one projection from (verb, state) to an event word (F13, corrected
+# 2026-11-12 on nime's review of the first shape).
 #
-# The word is the outcome as a suffix on the verb-family base (``SPAWN``,
-# ``WAKE``, ``FREEZE``, ``RESCUE``, ``TEARDOWN``, ``UI_RESTART``), with
-# ``REFUSED`` bare as the one non-event. The closed set those words belong to is
-# the store's (``audit.ACTION_EVENTS``), and this table is the only thing allowed
-# to choose a word for an action row: every write path asks it (``_run``,
-# ``_settle``, ``_refuse``, and the in-flight duplicate). Totality over
-# ``ACTIONS x TERMINAL`` is checked by a test, not by construction here: F13's
-# ruling put the raise in the test and the belt below, because a missing cell
-# must not abort an action and a record must not be lost to it.
+# `EVENT_BASES` is the only literal: one family base per verb. The suffixes follow
+# `TERMINAL`, and the *domain* is generated from `ACTIONS x TERMINAL`, so a fifth
+# terminal state arrives with its cells already present and no one has to
+# remember to add them. `EVENT_OVERRIDES` is the one cell that does not follow
+# the suffix rule, named in the table with its reason instead of in a prose
+# comment a reader has to go find.
+#
+# The vocabulary, `ACTION_EVENTS`, is the table's ordered unique values:
+# derived, never listed. Enumerating the full cross-product and *also* writing
+# the words down would mint a word no cell produces (`TEARDOWN_FAILED`, since
+# `("destroy", "failed")` is `TEARDOWN_PARTIAL`), and a dead word in a closed
+# set is the finding this item exists to remove.
+EVENT_BASES: Mapping[str, str] = MappingProxyType({
+    "spawn": "SPAWN",
+    # wake gets its own base, never SPAWN. The *effect* branch in `_execute` is
+    # shared (`("spawn", "wake")`) because the effect is one; the *word* is not,
+    # because the event column is the closed, validated one while the verb column
+    # is an input string. A vocabulary that merges two of its own inputs is a
+    # lossy validator: a reader scanning the event column would lose a door the
+    # row's unvalidated field still knows, and would have to trust that field to
+    # get it back. F9's literals stay parked — this is a word, not a branch.
+    "wake": "WAKE",
+    "freeze": "FREEZE",
+    "rescue": "RESCUE",
+    "destroy": "TEARDOWN",
+    "restart-ui": "UI_RESTART",
+})
 
-# Not a word in the vocabulary: it is the evidence that a cell was missing. It is
-# writable (the action completes and the row is kept) and it is meant to be
-# found, which is why it does not look like any verb's outcome.
+# The exception, in the table where a reader will look for it: revocation runs
+# before removal, so a destroy that failed has already done part of itself.
+# `PARTIAL` is true of it; `TEARDOWN_FAILED` would be a word no cell produces.
+EVENT_OVERRIDES: Mapping[tuple[str, str], str] = MappingProxyType({
+    ("destroy", "failed"): "TEARDOWN_PARTIAL",
+})
+
+
+# Not a word in the vocabulary: it is the evidence that a cell was missing.
 EVENT_FALLBACK = "EVENT_UNMAPPED"
 
+
+def _word(verb: str, state: str) -> str:
+    """The suffix rule: `succeeded` is the family base, the rest take `_<STATE>`.
+
+    `refused` is the exception the rule cannot express: a refusal is a non-event
+    — the core declined before acting — so it gets no family word. The bare word
+    is the marker that says *this row is not an event*, and it is only honest
+    beside a sentence that names the verb.
+    """
+    if state == "refused":
+        return "REFUSED"
+    base = EVENT_BASES[verb]
+    return base if state == "succeeded" else f"{base}_{state.upper()}"
+
+
 EVENT_TABLE: Mapping[tuple[str, str], str] = MappingProxyType({
-    # spawn: the first pod for a handle.
-    ("spawn", "succeeded"): "SPAWN",
-    ("spawn", "failed"): "SPAWN_FAILED",
-    ("spawn", "timeout"): "SPAWN_TIMEOUT",
-    # wake: a pod for a handle that already had a workspace. Its own base, never
-    # SPAWN. The *effect* branch in `_execute` is shared (`("spawn", "wake")`),
-    # because the effect is one; the *word* is not, because the event column is
-    # the closed, validated one while the verb column is an input string. A
-    # vocabulary that merges two of its own inputs is a lossy validator: a reader
-    # scanning the event column would lose a door the row's unvalidated field
-    # still knows, and would have to trust that field to get it back. F9's
-    # literals stay parked — this is a word, not a branch.
-    ("wake", "succeeded"): "WAKE",
-    ("wake", "failed"): "WAKE_FAILED",
-    ("wake", "timeout"): "WAKE_TIMEOUT",
-    # freeze / rescue: the agent handshake. A wait that timed out did not freeze
-    # anything that the word ``FREEZE`` may claim, and the same for rescue.
-    ("freeze", "succeeded"): "FREEZE",
-    ("freeze", "failed"): "FREEZE_FAILED",
-    ("freeze", "timeout"): "FREEZE_TIMEOUT",
-    ("rescue", "succeeded"): "RESCUE",
-    ("rescue", "failed"): "RESCUE_FAILED",
-    ("rescue", "timeout"): "RESCUE_TIMEOUT",
-    # destroy: ``PARTIAL`` for a teardown that ran and did not finish (the
-    # revocation happens first, so a failed destroy has already done part of
-    # itself, and there is deliberately no ``TEARDOWN_FAILED``); ``TIMEOUT`` for
-    # one that never answered, which asserts nothing about how far it got.
-    ("destroy", "succeeded"): "TEARDOWN",
-    ("destroy", "failed"): "TEARDOWN_PARTIAL",
-    ("destroy", "timeout"): "TEARDOWN_TIMEOUT",
-    # restart-ui: the pod replacement (L-10).
-    ("restart-ui", "succeeded"): "UI_RESTART",
-    ("restart-ui", "failed"): "UI_RESTART_FAILED",
-    ("restart-ui", "timeout"): "UI_RESTART_TIMEOUT",
-    # Every verb: a refusal is a non-event — the core declined before acting — so
-    # it gets no verb-family word. The bare word is the marker that says *this
-    # row is not an event*, and it is only honest beside a sentence that names
-    # the verb, which every `_refuse` caller must write.
-    ("spawn", "refused"): "REFUSED",
-    ("wake", "refused"): "REFUSED",
-    ("freeze", "refused"): "REFUSED",
-    ("rescue", "refused"): "REFUSED",
-    ("destroy", "refused"): "REFUSED",
-    ("restart-ui", "refused"): "REFUSED",
+    (verb, state): EVENT_OVERRIDES.get((verb, state), _word(verb, state))
+    for verb in ACTIONS for state in TERMINAL
 })
+
+# The closed set the *table* produces — not "the set an action row can produce":
+# a row can carry `EVENT_FALLBACK`, and that word is deliberately outside this
+# set, because it is not a word in the vocabulary but the evidence that a cell
+# was missing.
+ACTION_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(EVENT_TABLE.values()))
 
 
 def _event(verb: str, state: str) -> str:
@@ -818,9 +822,12 @@ def _event(verb: str, state: str) -> str:
 
     Total by a test over ``ACTIONS x TERMINAL``. Not total by construction here,
     on purpose: at write time a missing cell must not raise into the executor and
-    must not borrow a word that means something else, so it writes
-    ``EVENT_FALLBACK`` and says so at warning level. Blindness stays audible; the
-    action still completes; the row is found later by its own word.
+    must not borrow a word that means something else.
+
+    While the totality test holds this branch is **unreachable**. It is a belt
+    for the world where the tests did not run: that world gets a warning, the
+    action still completes, and the row is found later by a word that looks like
+    no verb's outcome.
     """
     word = EVENT_TABLE.get((verb, state))
     if word is None:
