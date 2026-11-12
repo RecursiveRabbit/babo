@@ -83,28 +83,30 @@ def test_the_client_refuses_the_pod_verb_on_the_agent_path_and_from_a_session() 
     assert via_act.unavailable and "agent path" in via_act.said
 
     from_a_session = client.restart_ui("r", actor=Actor("owner", "webui-session"))
-    assert from_a_session.unavailable and "not a host_operator" in from_a_session.said
+    assert from_a_session.unavailable and "provenance is not the host operator" in from_a_session.said
     assert not calls, "neither refusal left the pod"
 
-    derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("host-wg"))
+    derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("evans", "host-wg"))
     assert derived.ok and derived.status == 202
     assert calls == [{"method": "POST", "url": "http://x/api/v1/office/ui/restart",
-                      "body": {"reason": "invalidate sessions", "actor": "host_operator",
+                      "body": {"reason": "invalidate sessions", "actor": "evans",
                                "actor_source": "host-wg"}}]
 
 
 def test_an_operator_cannot_be_derived_from_anything_but_a_host_wg_session() -> None:
     """One place derives the operator, so the surface cannot grow a second idea.
 
-    The token is the ruling's class word, not a person's name: the person is proved
-    at the door, and this side only carries the class the door proved.
+    Both halves travel together (F-7): a name without provenance is a string that
+    satisfied a check, not an identity; a provenance without a name is anonymous.
     """
     import pytest
 
     for source in ("webui-session", "channel", "terminal", ""):
         with pytest.raises(ValueError):
-            hop.operator_from_session(source)
-    assert hop.operator_from_session("host-wg") == Actor("host_operator", "host-wg")
+            hop.operator_from_session("evans", source)
+    with pytest.raises(ValueError):
+        hop.operator_from_session("   ", "host-wg")
+    assert hop.operator_from_session("evans", "host-wg") == Actor("evans", "host-wg")
 
 
 # -- service ----------------------------------------------------------------
@@ -186,16 +188,21 @@ def test_restart_ui_admits_two_doors_and_exactly_one_class() -> None:
     core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
 
-    refused_stranger, payload = svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "host_operator",
+    refused_stranger, payload = svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "evans",
                                                           "actor_source": "host-wg"})
     assert refused_stranger == 403 and "not an admitted door" in payload["detail"]
 
-    for caught in ("lead-1", "crew-2", "babo-ui", "owner", "agent-service", ""):
-        status, payload = svc.restart_ui(UI, {"reason": "r", "actor": caught,
-                                             "actor_source": "host-wg"})
+    for caught in ("webui-session", "channel", "terminal", "lead-1", ""):
+        status, payload = svc.restart_ui(UI, {"reason": "r", "actor": "evans",
+                                             "actor_source": caught})
         assert status in (400, 403)
         if status == 403:
-            assert "not a host_operator" in payload["detail"], payload
+            assert "provenance is not the host operator" in payload["detail"], payload
+            assert repr(caught) in payload["detail"], "the refusal names the class it caught"
+        else:
+            assert "missing reason, actor or actor_source" in payload["detail"]
+    # A name is not optional either (F-7): provenance without a person is anonymous.
+    assert svc.restart_ui(OP, {"reason": "r", "actor": "", "actor_source": "host-wg"})[0] == 400
     assert not core.audit, "no refusal above reached the core"
 
 
@@ -211,18 +218,18 @@ def test_restart_ui_is_accepted_from_either_door_and_is_best_effort() -> None:
         core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
         svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
 
-        status, payload = svc.restart_ui(door, {"reason": "invalidate sessions", "actor": "host_operator",
+        status, payload = svc.restart_ui(door, {"reason": "invalidate sessions", "actor": "evans",
                                                 "actor_source": "host-wg", "action_id": "r1"})
         assert status == 202
         assert payload["status"] == "accepted" and payload["best_effort"] is True
         assert "succeeded" in payload["note"] and "will not see" in payload["note"], (
             "the contract names what the caller will never observe")
         assert payload["status"] not in ("succeeded", "failed", "timeout")
-        # Acceptance (b): the row carries BOTH the pod's handle and the operator's
-        # class. A row with one and not the other has proved half of §8.
+        # Acceptance (b), as corrected by soro: the row carries the pod's handle, the
+        # operator's name, and the door's provenance — all three, or it proved half.
         assert core.audit[-1][0] == service.UI_POD, "the audit row names the pod, not a synthetic handle"
         assert core.audit[-1][1] == "restart-ui"
-        assert core.audit[-1][2:] == ("host_operator", "host-wg"), "the row carries the class, not a name"
+        assert core.audit[-1][2:] == ("evans", "host-wg"), "name and provenance together"
 
 
 def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
@@ -230,6 +237,40 @@ def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
     core = _core()
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.act(UI, {"handle": "crew-1", "action": "restart-ui", "reason": "r",
-                                   "actor": "host_operator", "actor_source": "host-wg"})
+                                   "actor": "evans", "actor_source": "host-wg"})
     assert status == 403 and "host operator's verb" in payload["detail"]
     assert not core.audit, "a closed door leaves no row"
+
+
+def test_the_row_the_ui_reads_names_who_asked_and_why() -> None:
+    """The read half of (c): the post-restart reader can see the audit fields.
+
+    D-12's contradiction, ruled 2026-11-11: the UI is the reader, so the hop must
+    expose `actor`, `actor_source`, `reason`, state and detail by action id. This
+    is a projection of the row the core already writes — no new verb, no second
+    store, and nothing here lets the UI read Manager state directly.
+    """
+    core = _core()
+    core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    status, _ = svc.restart_ui(OP, {"reason": "sessions leaked", "actor": "evans",
+                                    "actor_source": "host-wg", "action_id": "restart-7"})
+    assert status == 202
+
+    read, payload = svc.action(UI, "restart-7")
+    assert read == 200
+    assert payload == {"state": "succeeded", "detail": "replaced the UI pod; sessions invalidated",
+                       "id": "restart-7", "handle": service.UI_POD, "action": "restart-ui",
+                       "actor": "evans", "actor_source": "host-wg", "reason": "sessions leaked"}
+
+
+def test_the_client_passes_the_audit_fields_through_untouched() -> None:
+    answered = {"state": "succeeded", "detail": "replaced the UI pod", "id": "r-1",
+                "handle": "babo-ui", "action": "restart-ui", "actor": "evans",
+                "actor_source": "host-wg", "reason": "sessions leaked"}
+
+    def transport(method: str, url: str, body: object, timeout_s: float) -> tuple[int, str]:
+        return 200, json.dumps(answered)
+
+    result = hop.HopClient("http://x", transport=transport).action("r-1")
+    assert result.ok and result.payload == answered

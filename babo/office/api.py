@@ -48,16 +48,13 @@ ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
 # verbs; what narrows is the door, not the word.
 AGENT_ACTIONS = tuple(verb for verb in ACTIONS if verb != "restart-ui")
 
-# The one verb the host operator may invoke, and the class token that authorizes
-# it — an allow-list of exactly one (soro's §8 ruling, 2026-11-11). The check is
-# `actor == OPERATOR_ACTOR`, never a deny-list of the classes we happened to think
-# of: a deny-list is a row a sixth class slips past the day someone adds one.
+# The one verb the host operator may invoke, and the class word that authorizes
+# it — an allow-list of exactly one (soro's §8 ruling, corrected 2026-11-11: the
+# check is on the *provenance*, `actor_source == "host-wg"`, not on a literal
+# actor token; the actor is the operator's own name beside it). Never a deny-list
+# of the five classes we happened to think of: a deny-list is a row a sixth class
+# slips past the day someone adds one.
 OPERATOR_ACTIONS = ("restart-ui",)
-OPERATOR_ACTOR = "host_operator"
-
-# The word the door's own authentication carries. Transport peer identity is not
-# operator authority (the ruling's first half): this names *where* the claim came
-# from — the host-WG door — while OPERATOR_ACTOR names the only class admitted.
 OPERATOR_SOURCE = "host-wg"
 
 # Terminal states, verbatim. Anything else is still in flight.
@@ -82,6 +79,13 @@ class ActionRecord:
     action: str
     state: str = "pending"
     said: str = ""
+    # The read half of the audit row (D-12's contradiction, ruled 2026-11-11):
+    # the UI is the post-restart reader, so the row it polls must name who asked
+    # and why. These are projection fields only — the write contract is unchanged,
+    # and nothing here is a second store.
+    actor: str = ""
+    actor_source: str = ""
+    reason: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in ("pending", "running", *TERMINAL):
