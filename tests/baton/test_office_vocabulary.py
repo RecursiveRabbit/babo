@@ -26,15 +26,10 @@ from typing import get_args
 import pytest
 
 from babo.office.api import ACTIONS, AGENT_ACTIONS, OPERATOR_ACTIONS, TERMINAL
+from babo.office.audit import EVENT_HISTORY
 from babo.office.audit import EVENTS as STORE_EVENTS
-from babo.office.core import (
-    ACTION_EVENTS,
-    EVENT_BASES,
-    EVENT_FALLBACK,
-    EVENT_TABLE,
-    ActionState,
-    _event,
-)
+from babo.office.core import ActionState, _event
+from babo.office.vocabulary import ACTION_EVENTS, EVENT_BASES, EVENT_FALLBACK, EVENT_TABLE
 
 # L-01's five, in order, plus L-10's amendment last.
 FROZEN = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
@@ -103,11 +98,26 @@ def test_the_table_does_not_mint_a_dead_word() -> None:
     assert "TEARDOWN_PARTIAL" in ACTION_EVENTS
 
 
+def test_the_store_vocabulary_cannot_lag_the_writer() -> None:
+    # F16: `insert_audit` is the only validating write in the office, and it
+    # checks `EVENTS`. If that tuple were the history alone, routing an action row
+    # through it — the tidy refactor someone will write — would reject every word
+    # the core writes today. Containment is asserted, not left to a comment.
+    assert set(ACTION_EVENTS) <= set(STORE_EVENTS)
+    # the history stays the prefix, in its preserved order
+    assert STORE_EVENTS[:len(EVENT_HISTORY)] == EVENT_HISTORY
+    # and the union is exact: nothing in the store's set that is neither history
+    # nor a word the writer can produce
+    assert set(STORE_EVENTS) == set(EVENT_HISTORY) | set(ACTION_EVENTS)
+    # no duplicate smuggled in by the union (REFUSED is in both halves)
+    assert len(STORE_EVENTS) == len(set(STORE_EVENTS))
+
+
 def test_the_new_words_are_exactly_this_landings_declaration() -> None:
-    # `EVENTS` is the preserved vocabulary (audit.py): what the column has been
-    # written with, including every wake row written before 2026-11-12, which says
-    # `SPAWN`. This landing changed what may be written *now*, and the delta is
-    # named here so a third list cannot appear by drift.
+    # `EVENT_HISTORY` is what the column has been written with, including every
+    # wake row written before 2026-11-12, which says `SPAWN`. This landing changed
+    # what may be written *now*, and the delta is named here so a third list
+    # cannot appear by drift.
     introduced = {
         "SPAWN_TIMEOUT", "WAKE", "WAKE_FAILED", "WAKE_TIMEOUT",
         "FREEZE_FAILED", "FREEZE_TIMEOUT", "RESCUE_FAILED", "RESCUE_TIMEOUT",
@@ -116,8 +126,8 @@ def test_the_new_words_are_exactly_this_landings_declaration() -> None:
     preserved_only = {
         "FREEZE_FALLBACK_RESCUE", "CREDENTIAL_REVOKE_PARTIAL", "CREDENTIAL_RECONCILE",
     }
-    assert set(ACTION_EVENTS) - set(STORE_EVENTS) == introduced
-    assert set(STORE_EVENTS) - set(ACTION_EVENTS) == preserved_only
+    assert set(ACTION_EVENTS) - set(EVENT_HISTORY) == introduced
+    assert set(EVENT_HISTORY) - set(ACTION_EVENTS) == preserved_only
 
 
 def test_the_state_word_type_is_the_runtime_set() -> None:

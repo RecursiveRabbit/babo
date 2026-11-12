@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -838,3 +839,40 @@ def test_a_branch_that_returns_a_word_outside_the_contract_still_settles_the_row
     stored = manager.store.get_action(record.id)
     assert stored is not None and stored.finished_at is not None
     assert _last_event(manager, "agent-a") == "SPAWN_FAILED"
+
+
+def test_the_store_writes_one_offset_and_the_read_renders_the_house(tmp_path: Path) -> None:
+    # Bomu's ruling, as a row: the store keeps ONE offset — UTC, the one every row
+    # already has — because `created_at` is compared and sorted as text; the house's
+    # zone is rendering, and rendering happens where an agent reads. This manager
+    # has **no clock argument**: the production wiring, because an injected clock
+    # proves the wiring and never the default.
+    manager = NativeManager(store=Store(tmp_path / "m.db"), runtime=RecordingRuntime(),
+                            ledger=_ledger(tmp_path))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans",
+                                        actor_source="terminal"))
+
+    stored = manager.store.get_action(record.id)
+    assert stored is not None
+    assert stored.created_at.endswith("+00:00"), stored.created_at      # the store's one offset
+
+    house = datetime.now(ZoneInfo("America/Detroit"))
+    rendered = datetime.fromisoformat(record.created_at)                 # parses
+    assert rendered.utcoffset() == house.utcoffset(), record.created_at   # carries -05:00
+    assert abs((rendered - house).total_seconds()) < 60, record.created_at
+    assert rendered == datetime.fromisoformat(stored.created_at)         # same instant, two clothes
+
+
+def test_the_restart_read_renders_the_house_zone_like_the_single_row_read(
+    tmp_path: Path,
+) -> None:
+    # The other API projection. Two endpoints teaching two clients two spellings is
+    # the failure; both render, and both render the same instant.
+    from babo.office.service import ManagerService
+
+    manager = NativeManager(store=Store(tmp_path / "m.db"), runtime=RecordingRuntime(),
+                            ledger=_ledger(tmp_path))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans",
+                                        actor_source="terminal"))
+    payload = ManagerService._row(manager.store.get_action(record.id))
+    assert payload["created_at"] == record.created_at

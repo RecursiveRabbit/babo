@@ -101,3 +101,40 @@ def test_only_legal_terminal_states_are_written(tmp_path: Path) -> None:
     with pytest.raises(StoreError) as caught:
         store.finish_action(action_id, state="running", said="no", at=NOW(), event="SPAWN")
     assert "not a terminal state" in str(caught.value)
+
+
+def test_a_store_that_spans_the_changeover_still_orders_by_instant(tmp_path: Path) -> None:
+    # Bomu's first measurement: `ORDER BY created_at DESC` is a **text** sort, so a
+    # store holding rows written under two offsets sorts by spelling, not by time —
+    # permanently, for every read. The store now writes one offset (UTC), so any row
+    # it accepts is comparable; this writes both shapes through the public API.
+    store = _store(tmp_path)
+    # 19:00Z is 14:00 in Detroit; five minutes later, rendered in Detroit, the later
+    # instant carries the *smaller* text. Text order and instant order disagree.
+    store.create_action(action_id="A", handle="agent-a", verb="spawn", actor="evans",
+                        reason="r", boot_id="b1", at="2026-11-12T19:00:00+00:00")
+    store.create_action(action_id="B", handle="agent-a", verb="spawn", actor="evans",
+                        reason="r", boot_id="b1", at="2026-11-12T14:05:00-05:00")
+
+    rows = store.actions(handle="agent-a")
+    assert [row.id for row in rows] == ["B", "A"], [(r.id, r.created_at) for r in rows]
+    assert {row.created_at for row in rows} == {
+        "2026-11-12T19:00:00+00:00", "2026-11-12T19:05:00+00:00",
+    }
+
+
+def test_a_claim_written_under_another_offset_still_expires(tmp_path: Path) -> None:
+    # Bomu's second measurement: `expires_at <= ?` is a text comparison too, so a
+    # claim stored at 19:00Z could never be expired by a `now` rendered as
+    # 14:05-05:00 — the (handle, verb) pair stays refused until the clock's local
+    # text passes the stored string. One offset in the store puts both sides of the
+    # comparison in the same kind of string.
+    store = _store(tmp_path)
+    store.claim("agent-a", "spawn", "old-id", expires_at="2026-11-12T19:00:00+00:00")
+
+    claimed = store.claim_or_read("agent-a", "spawn", "new-action",
+                                  expires_at="2026-11-12T19:30:00+00:00",
+                                  now="2026-11-12T14:05:00-05:00")
+
+    assert claimed == "new-action"
+    assert store.in_flight("agent-a", "spawn") == "new-action"

@@ -18,10 +18,32 @@ from __future__ import annotations
 import sqlite3
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from babo.office.api import TERMINAL
+from babo.office.vocabulary import ACTION_EVENTS
+
+
+def _utc(stamp: str) -> str:
+    """The store's one offset: UTC, with the offset rendered.
+
+    F16's neighbour (bomu's measurement). This store compares and sorts ISO stamps
+    **as text** — `ORDER BY created_at DESC` and `expires_at <= ?` — which is only
+    true of instants while every row carries the same offset. So the canonical form
+    is written here, once, instead of being a property of whichever clock a caller
+    wired in: a claim in flight and a row from an hour ago are then comparable even
+    if the caller rendered Detroit.
+
+    The instant is unchanged and no migration is needed: every row already written
+    is UTC. A naive stamp is read as UTC, which is the same assumption `core._parse`
+    makes for deadlines.
+    """
+    parsed = datetime.fromisoformat(stamp)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
 
 # The store's state set (ledger L-02). The terminal words are the interface's,
 # not a second copy: api.py is the single source (Bomu's slice lint).
@@ -31,18 +53,19 @@ ACTION_STATES = ("pending", "running", *TERMINAL)
 # model had no actor gate and so no audit row for a refusal; A-03/A-05 require
 # one. Named here, not invented per call site.
 #
-# **This is history, not the current writer.** The words the core may write now
-# are ``core.ACTION_EVENTS``, derived from ``core.EVENT_TABLE``; ``finish_action``
-# writes those without validating them (a record must not be lost to a missing
-# word), and ``insert_audit`` — the only validating write, used by the credential
-# ledger — checks this tuple.
+# **This is the history, and it is the prefix.** The words the core may write
+# now — ``vocabulary.ACTION_EVENTS``, derived from ``vocabulary.EVENT_TABLE`` —
+# are unioned on below, so `insert_audit` (the only validating write in the
+# office) accepts every word the writer can produce. F16: those were two lists
+# for one column, and the validating half would have rejected the writer's own
+# words the moment anyone routed action rows through it.
 #
 # **WAKE split out of SPAWN on 2026-11-12.** Every wake row written before that
 # date says `SPAWN`, and no wake row says it after; a query for all wakes has to
 # union both words, and only the row's verb column says which door a pre-split
 # row came through. `EVENT_UNMAPPED` (core's fallback) is deliberately absent:
 # it is not a word in the vocabulary, it is the evidence that a cell was missing.
-EVENTS = (
+EVENT_HISTORY = (
     "SPAWN",
     "SPAWN_FAILED",
     "FREEZE",
@@ -55,6 +78,12 @@ EVENTS = (
     "CREDENTIAL_REVOKE_PARTIAL",
     "CREDENTIAL_RECONCILE",
     "REFUSED",
+)
+
+# One derived line, not a second list: the preserved order stays as the prefix and
+# the writer's words are unioned on, so this cannot lag the table by one edit.
+EVENTS = tuple(EVENT_HISTORY) + tuple(
+    word for word in ACTION_EVENTS if word not in EVENT_HISTORY
 )
 
 CREDENTIAL_STATES = ("pending", "open", "revoked", "failed")
@@ -273,7 +302,8 @@ class Store:
                 self._conn.execute(
                     "INSERT INTO actions (id, handle, verb, state, said, actor, actor_source, reason,"
                     " boot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (action_id, handle, verb, state, said, actor, actor_source, reason, boot_id, at),
+                    (action_id, handle, verb, state, said, actor, actor_source, reason, boot_id,
+                     _utc(at)),
                 )
                 self._commit()
             except sqlite3.IntegrityError as exc:
@@ -319,7 +349,7 @@ class Store:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE actions SET state = 'running', started_at = ? WHERE id = ? AND state = 'pending'",
-                (at, action_id),
+                (_utc(at), action_id),
             )
             return cur.rowcount == 1
 
@@ -347,12 +377,12 @@ class Store:
                 self._begin()
                 self._conn.execute(
                     "UPDATE actions SET state = ?, said = ?, finished_at = ? WHERE id = ?",
-                    (state, said, at, action_id),
+                    (state, said, _utc(at), action_id),
                 )
                 self._conn.execute(
                     "INSERT INTO audit (at, event, handle, identity, actor, actor_source, verb,"
                     " reason, state, action_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (at, event, row.handle, identity, row.actor, row.actor_source, row.verb,
+                    (_utc(at), event, row.handle, identity, row.actor, row.actor_source, row.verb,
                      row.reason, state, action_id, detail or said),
                 )
                 self._conn.execute(
@@ -372,7 +402,7 @@ class Store:
                 self._begin()
                 self._conn.execute(
                     "INSERT INTO single_flight (handle, verb, action_id, expires_at) VALUES (?, ?, ?, ?)",
-                    (handle, verb, action_id, expires_at),
+                    (handle, verb, action_id, _utc(expires_at)),
                 )
                 self._commit()
             except sqlite3.IntegrityError as exc:
@@ -395,11 +425,11 @@ class Store:
                 self._begin()
                 self._conn.execute(
                     "DELETE FROM single_flight WHERE handle = ? AND verb = ? AND expires_at <= ?",
-                    (handle, verb, now),
+                    (handle, verb, _utc(now)),
                 )
                 self._conn.execute(
                     "INSERT INTO single_flight (handle, verb, action_id, expires_at) VALUES (?, ?, ?, ?)",
-                    (handle, verb, action_id, expires_at),
+                    (handle, verb, action_id, _utc(expires_at)),
                 )
                 self._commit()
                 return action_id
@@ -474,8 +504,11 @@ class Store:
                     " issued_at, expires_at, state, unrevocable, revoked_at, revoked_reason, note)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (record.id, record.instance, record.scope, record.boot_id, record.launch_ref,
-                     record.locator, record.issued_at, record.expires_at, record.state,
-                     int(record.unrevocable), record.revoked_at, record.revoked_reason, record.note),
+                     record.locator, _utc(record.issued_at),
+                     _utc(record.expires_at) if record.expires_at else record.expires_at,
+                     record.state, int(record.unrevocable),
+                     _utc(record.revoked_at) if record.revoked_at else record.revoked_at,
+                     record.revoked_reason, record.note),
                 )
                 self._commit()
             except sqlite3.IntegrityError as exc:
@@ -558,7 +591,7 @@ class Store:
             self._conn.execute(
                 "UPDATE credentials SET state = 'revoked', revoked_at = ?, revoked_reason = ?, note = ?"
                 " WHERE id = ? AND state IN ('open', 'pending')",
-                (at, reason, note, credential_id),
+                (_utc(at), reason, note, credential_id),
             )
         return self.get_credential(credential_id)  # type: ignore[return-value]
 

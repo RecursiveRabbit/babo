@@ -48,8 +48,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import MappingProxyType
-from typing import Callable, Literal, Mapping
+from typing import Callable, Literal
+from zoneinfo import ZoneInfo
 
 from babo.office import model
 from babo.office.api import ACTIONS, TERMINAL, ActionRecord
@@ -66,6 +66,7 @@ from babo.office.runtime import (
     RuntimeVerdictError,
     UnwiredAgentControl,
 )
+from babo.office.vocabulary import EVENT_FALLBACK, EVENT_TABLE
 
 _LOG = logging.getLogger(__name__)
 
@@ -191,8 +192,39 @@ def decide(verb: str, facts: ContainerFacts | None, identity: Identity | None,
     return Refusal(f"unknown action {verb!r}; it is one of {', '.join(ACTIONS)}")
 
 
+# The house's zone, for rendering only. Named, because the rule is that every
+# clock an agent *sees* reports Detroit — and because a container's process zone is
+# often UTC, which would make a "local" render silently wrong.
+HOUSE_ZONE = ZoneInfo("America/Detroit")
+
+
 def now_iso() -> str:
+    """What the store writes: UTC, one offset for every row.
+
+    Bomu measured the first shape of this fix. `created_at` and `expires_at` are
+    compared and sorted **as text** in SQL, so a store whose rows carry two offsets
+    is permanently misordered and a claim in flight stops expiring on time. The
+    rule that every clock an agent sees reports Detroit is about what is *shown*,
+    not about what the database compares — so the store keeps the offset every row
+    already has, and `house_time` renders at the read edge.
+
+    The offset stays rendered here too: `_parse` assumes UTC for a naive stamp, so
+    a UTC clock that dropped its offset would move every deadline by the zone's
+    shift.
+    """
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def house_time(stamp: str) -> str:
+    """The same instant in the house's zone, for anything an agent reads.
+
+    The one place a stamp changes clothes: the store keeps one offset because it
+    compares these strings, and a reader is owed the zone the house lives in. An
+    empty stamp stays empty (a pending row has no finish time).
+    """
+    if not stamp:
+        return stamp
+    return _parse(stamp).astimezone(HOUSE_ZONE).isoformat(timespec="seconds")
 
 
 def _parse(stamp: str) -> datetime:
@@ -339,7 +371,7 @@ class NativeManager:
             raise UnknownActionError(f"no such action: {action_id}")
         return ActionRecord(id=row.id, handle=row.handle, action=row.verb, state=row.state,
                            said=row.said, actor=row.actor, actor_source=row.actor_source,
-                           reason=row.reason, created_at=row.created_at)
+                           reason=row.reason, created_at=house_time(row.created_at))
 
     # -- the one write boundary -----------------------------------------
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",
@@ -769,73 +801,6 @@ def _asked(actor: str, source: str) -> str:
     return f"asked by {actor} via {source}" if source else f"asked by {actor}"
 
 
-# The one projection from (verb, state) to an event word (F13, corrected
-# 2026-11-12 on nime's review of the first shape).
-#
-# `EVENT_BASES` is the only literal: one family base per verb. The suffixes follow
-# `TERMINAL`, and the *domain* is generated from `ACTIONS x TERMINAL`, so a fifth
-# terminal state arrives with its cells already present and no one has to
-# remember to add them. `EVENT_OVERRIDES` is the one cell that does not follow
-# the suffix rule, named in the table with its reason instead of in a prose
-# comment a reader has to go find.
-#
-# The vocabulary, `ACTION_EVENTS`, is the table's ordered unique values:
-# derived, never listed. Enumerating the full cross-product and *also* writing
-# the words down would mint a word no cell produces (`TEARDOWN_FAILED`, since
-# `("destroy", "failed")` is `TEARDOWN_PARTIAL`), and a dead word in a closed
-# set is the finding this item exists to remove.
-EVENT_BASES: Mapping[str, str] = MappingProxyType({
-    "spawn": "SPAWN",
-    # wake gets its own base, never SPAWN. The *effect* branch in `_execute` is
-    # shared (`("spawn", "wake")`) because the effect is one; the *word* is not,
-    # because the event column is the closed, validated one while the verb column
-    # is an input string. A vocabulary that merges two of its own inputs is a
-    # lossy validator: a reader scanning the event column would lose a door the
-    # row's unvalidated field still knows, and would have to trust that field to
-    # get it back. F9's literals stay parked — this is a word, not a branch.
-    "wake": "WAKE",
-    "freeze": "FREEZE",
-    "rescue": "RESCUE",
-    "destroy": "TEARDOWN",
-    "restart-ui": "UI_RESTART",
-})
-
-# The exception, in the table where a reader will look for it: revocation runs
-# before removal, so a destroy that failed has already done part of itself.
-# `PARTIAL` is true of it; `TEARDOWN_FAILED` would be a word no cell produces.
-EVENT_OVERRIDES: Mapping[tuple[str, str], str] = MappingProxyType({
-    ("destroy", "failed"): "TEARDOWN_PARTIAL",
-})
-
-
-# Not a word in the vocabulary: it is the evidence that a cell was missing.
-EVENT_FALLBACK = "EVENT_UNMAPPED"
-
-
-def _word(verb: str, state: str) -> str:
-    """The suffix rule: `succeeded` is the family base, the rest take `_<STATE>`.
-
-    `refused` is the exception the rule cannot express: a refusal is a non-event
-    — the core declined before acting — so it gets no family word. The bare word
-    is the marker that says *this row is not an event*, and it is only honest
-    beside a sentence that names the verb.
-    """
-    if state == "refused":
-        return "REFUSED"
-    base = EVENT_BASES[verb]
-    return base if state == "succeeded" else f"{base}_{state.upper()}"
-
-
-EVENT_TABLE: Mapping[tuple[str, str], str] = MappingProxyType({
-    (verb, state): EVENT_OVERRIDES.get((verb, state), _word(verb, state))
-    for verb in ACTIONS for state in TERMINAL
-})
-
-# The closed set the *table* produces — not "the set an action row can produce":
-# a row can carry `EVENT_FALLBACK`, and that word is deliberately outside this
-# set, because it is not a word in the vocabulary but the evidence that a cell
-# was missing.
-ACTION_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(EVENT_TABLE.values()))
 
 
 def _event(verb: str, state: str) -> str:

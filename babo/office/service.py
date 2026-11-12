@@ -312,8 +312,15 @@ class ManagerService:
         up inside a restart cannot otherwise tell *the restart that made me* from *a
         restart aimed at me*. It also makes "newest first" falsifiable by the caller
         instead of a claim the door makes about itself.
+
+        The stamp is rendered in the house's zone (`core.house_time`) exactly as the
+        single-row read renders it: the store keeps one offset because it compares
+        these strings, and a caller is owed the zone the house lives in. Imported
+        here, not at module scope, so this surface stays importable without the core.
         """
+        from babo.office.core import house_time
+
         return {"state": row.state, "detail": row.said, "id": row.id,
                 "handle": row.handle, "action": row.verb,
                 "actor": row.actor, "actor_source": row.actor_source,
-                "reason": row.reason, "created_at": row.created_at}
+                "reason": row.reason, "created_at": house_time(row.created_at)}
