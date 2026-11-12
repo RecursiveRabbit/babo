@@ -24,7 +24,12 @@ from babo.office.core import (
     decide,
 )
 from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
-from babo.office.runtime import ContainerFacts, LaunchSpec, RuntimeUnavailableError
+from babo.office.runtime import (
+    ContainerFacts,
+    LaunchSpec,
+    RuntimeUnavailableError,
+    RuntimeVerdictError,
+)
 from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
@@ -579,7 +584,7 @@ def test_a_runtime_that_vanishes_mid_spawn_is_timeout_not_failed(tmp_path: Path)
                                         actor_source="terminal"))
     assert record.state == "timeout"
     assert record.said == (
-        "no verdict arrived, the runtime could not be read (socket went away); effect unstated"
+        "the command returned no usable verdict (socket went away); effect unstated"
     )
     # Opposite polarity from the expired-deadline row: this one *did* start, and that
     # is the column that separates the two `timeout` sites in the record.
@@ -622,6 +627,25 @@ def test_an_executor_that_raises_is_failed_with_the_effect_left_open(tmp_path: P
     assert record.said == (
         "ValueError: boom; dispatched and interrupted before a verdict, "
         "so whether it took effect is unknown"
+    )
+
+
+def test_a_runtime_verdict_is_failed_and_names_the_rc(tmp_path: Path) -> None:
+    # F12: a non-zero rc is a verdict that arrived. `timeout` is for silence, so the
+    # row is `failed` — and `failed` still does not assert the effect, which the
+    # sentence says rather than leaving the reader to guess.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def refuse(spec: LaunchSpec) -> ContainerFacts:
+        raise RuntimeVerdictError("podman run failed (rc=125): image not found")
+
+    runtime.run = refuse  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert record.said == (
+        "podman run failed (rc=125): image not found; the effect is not asserted"
     )
 
 

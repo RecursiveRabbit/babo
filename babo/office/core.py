@@ -56,6 +56,7 @@ from babo.office.runtime import (
     PodmanRuntime,
     Runtime,
     RuntimeUnavailableError,
+    RuntimeVerdictError,
     UnwiredAgentControl,
 )
 
@@ -386,10 +387,15 @@ class NativeManager:
                 facts = self.runtime.inspect_container(handle)
             except RuntimeUnavailableError as exc:
                 # Cannot decide without facts; refuse rather than assume absence.
+                # The detail names the cause in the exception's own words: a runtime
+                # that answered with an error must not be described as unreadable,
+                # and one that never answered must not be described as having
+                # refused. The old lead clause ("runtime could not be read") was
+                # false for half the rows this handler covers, and the evidence
+                # appended after it contradicted it in the same sentence.
                 return self._refuse(handle, action, actor=actor, actor_source=actor_source,
                                     reason=reason,
-                                    detail=f"runtime could not be read, so {action} cannot be "
-                                           f"decided for {handle}: {exc}",
+                                    detail=f"{action} cannot be decided for {handle}: {exc}",
                                     identity=identity.identity if identity else "")
 
         verdict = decide(action, facts, identity, handle, record_state)
@@ -442,6 +448,14 @@ class NativeManager:
         identity = self._identity_of(row.handle) if self._identity_of else None
         try:
             state, said, event = self._execute(row, identity)
+        except RuntimeVerdictError as exc:
+            # F12: the runtime answered and the answer was a failure. A verdict
+            # arrived, so `timeout` would be a lie; `failed` is the word, and the
+            # sentence still refuses to claim the effect. This branch must stay above
+            # the RuntimeUnavailableError one: it is a subclass, and the base handler
+            # would otherwise swallow it back into `timeout`.
+            state, said, event = ("failed", f"{exc}; the effect is not asserted",
+                                  _event(row.verb, "failed"))
         except ControlUnavailableError as exc:
             # F10 (nime's ruling, grounded on the contract): this is not one of
             # `timeout`'s two sites — nothing expired, and a verdict did arrive, from
@@ -452,20 +466,15 @@ class NativeManager:
             state, said, event = ("refused", f"{exc}; nothing was attempted",
                                   _event(row.verb, "refused"))
         except RuntimeUnavailableError as exc:
-            # F10: the runtime could not be read, which is a fact; "unavailable" would
-            # be an inference from the exception's class name. Four sentences in this
-            # file say "could not be read"; this one does too. What it must not do is
-            # assert the effect — the read failed, so the effect is unstated.
-            #
-            # This mapping is only as good as the exception is coarse. The same class
-            # also carries the two non-zero-`rc` sites in runtime.py, where a command
-            # *did* return a verdict (an unhappy one). Until those raise something
-            # distinct (F12), `timeout` is the best available word for the bucket, not
-            # a complete one — and a reader must not take it as proof that no verdict
-            # existed.
+            # F10/F12: this bucket has three members — the tool absent, a timeout, and
+            # an exit with a message none of the markers names. "Could not be read" is
+            # true of the first two and false of the third: podman was read and
+            # answered with a status, we just cannot tell what about. So the sentence
+            # says what is true of all three and lets the exception carry the
+            # specifics. (`_wait_absent` keeps "could not be read" because there the
+            # read did not answer the question it was asked.)
             state, said, event = ("timeout",
-                                  "no verdict arrived, the runtime could not be read "
-                                  f"({exc}); effect unstated",
+                                  f"the command returned no usable verdict ({exc}); effect unstated",
                                   _event(row.verb, "timeout"))
         except Exception as exc:
             # It raised inside the executor: the action was dispatched and then

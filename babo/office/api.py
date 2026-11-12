@@ -21,17 +21,19 @@ Rules the implementation owes this interface (not restated anywhere else):
   disagreement between the runtime and the record is reported as `unknown` with
   a `note`, never resolved by preference.
 - **Lifecycle is terminal-state honest.** `succeeded | failed | refused |
-  timeout` are distinct, and what separates them is whether the core acted and
-  whether the word asserts the effect:
+  timeout` are distinct, and what separates them is whether the core accepted the
+  action and whether the word asserts the effect:
 
   - `refused` — the core declined before acting.
-  - `failed` — dispatched, and returned an error; the effect is **not** asserted.
-  - `timeout` — dispatched, and no verdict arrived; the effect is **not**
-    asserted. It covers both sites: a request interrupted before a verdict (the
-    row's `started_at` is set) and a deadline that passed before anything was
-    attempted (`started_at` is `NULL` — the machine-readable form of "nothing was
-    attempted").
-  - `succeeded` — dispatched, and **the effect is asserted**: the pod is up, the
+  - `failed` — accepted, and returned an error; the effect is **not** asserted.
+  - `timeout` — accepted, and no verdict arrived; the effect is **not** asserted.
+    It covers both sites: an action interrupted before a verdict (the row's
+    `started_at` is set) and a deadline that passed before anything was attempted
+    (`started_at` is `NULL` — the machine-readable form of "nothing was
+    attempted"). "Accepted" is the right noun for both: the core took the action
+    on, and then either it was interrupted or its deadline expired. "Dispatched"
+    would be false for the second site.
+  - `succeeded` — accepted, and **the effect is asserted**: the pod is up, the
     work is frozen, the UI was replaced. The `202`'s honesty rests on this word
     meaning that; no other word may borrow it.
 
@@ -39,12 +41,15 @@ Rules the implementation owes this interface (not restated anywhere else):
   records what was observed, never the effect. And when the core knows nothing was
   attempted, the row must say that rather than leave the reader to infer it.
 
-  This word is only as fine as the errors the runtime raises.
-  `RuntimeUnavailableError` also carries sites where a command returned a verdict
-  with a non-zero `rc`, so while that exception stays collapsed, `timeout` is the
-  best available word for the bucket and **not** a claim that no verdict existed.
-  The mapping is net better than `failed`, and it is not right about every row it
-  covers.
+  What lands here is decided by `runtime.py`'s classifier, not by the exit status.
+  A non-zero `rc` naming the object (absent, "image not found") is an answer and
+  becomes `failed`; one naming an unreachable service, or naming nothing we
+  recognise, is silence and stays `timeout`. Silence is the default because
+  claiming a verdict is the stronger claim. So a `timeout` row may mean the tool was
+  not there, it timed out, or it exited with a message we could not read — and the
+  row's own sentence, not the state word, says which. "Could not be read" stays
+  where the read genuinely failed, and is deliberately absent from the executor's
+  sentence, which also covers the message we could not read.
 - **Verbs are idempotent.** Waking an awake agent is a success that says so;
   it is not an error and not a fake restart.
 - **Credential rows carry identity only**: id, scope, issued/expires. The core
