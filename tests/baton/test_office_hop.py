@@ -178,11 +178,12 @@ def test_restart_ui_admits_two_doors_and_exactly_one_class() -> None:
     """L-10's standing (ruled 2026-11-11): the door is not the principal.
 
     Either admitted door may carry it — the operator's own host, or the UI pod
-    carrying that operator's identity — but the actor is an allow-list of exactly
-    one class, `host_operator`. A stranger address is not "close enough", and no
-    other class (a Lead, a crew agent, a service identity, a session, a terminal)
-    gets through even from an admitted door. Every refusal happens before effect:
-    no row, no core call, and the class it caught is named.
+    carrying that operator's identity — but the provenance is an allow-list of
+    exactly one class, `OPERATOR_SOURCE` (F-7: the class, not the name). A
+    stranger address is not "close enough", and no other class (a Lead, a crew
+    agent, a service identity, a session, a terminal) gets through even from an
+    admitted door. Every refusal happens before effect: no row, no core call, and
+    the class it caught is named.
     """
     core = _core()
     core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")

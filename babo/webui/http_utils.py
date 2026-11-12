@@ -9,6 +9,7 @@ import http
 import ipaddress
 import json
 import re
+import socket
 import time
 from dataclasses import dataclass
 from typing import Any, cast
@@ -330,13 +331,19 @@ def is_unix_socket_peer(connection: Any) -> bool:
     to mint, no trusted-source entry, no second external surface.
     """
     addr: object = getattr(connection, "remote_address", None)
-    if addr is None:
-        # websockets reports no address for a Unix-domain server connection.
-        return True
     if isinstance(addr, str):
         # Some builds report the socket path as the "address".
         return "/" in addr and not addr.replace(":", "").replace(".", "").isdigit()
-    return False
+    if addr is not None:
+        # A TCP peer is never the socket, whatever else the listener accepts.
+        return False
+    # No address at all is *absence of evidence*, not evidence of locality. This is
+    # the one path a misreported or spoofed TCP connection could take to look local
+    # — and "local" here means "no token needed" — so it is corroborated rather
+    # than assumed: the transport must actually be a Unix-domain socket. (bomu F1.)
+    transport = getattr(connection, "transport", None)
+    sock = transport.get_extra_info("socket") if transport is not None else None
+    return getattr(sock, "family", None) == socket.AF_UNIX
 
 
 def is_trusted_source_request(connection: Any, trusted_sources: list[str] | tuple[str, ...]) -> bool:

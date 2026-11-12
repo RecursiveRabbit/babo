@@ -125,10 +125,12 @@ class ManagerService:
 
         Two admissions, one principal (ruled 2026-11-11). The API-source check
         guards who may reach the port; the authority check guards whose act it is,
-        and it is an allow-list of exactly one: the row must carry both
-        `handle == "babo-ui"` and `actor == "host_operator"`. Everything else — a
-        Lead, a crew agent, a service identity, a session, an unauthenticated local
-        process — is refused here **before effect**, with the class it caught named.
+        and it is an allow-list of exactly one: the caller's provenance must be
+        `OPERATOR_SOURCE`, and the agent is not the caller's to name — this handler
+        fixes it at `UI_POD`. Everything else — a Lead, a crew agent, a service
+        identity, a session, an unauthenticated local process, or a name offered
+        without that provenance — is refused here **before effect**, with the class
+        it caught named.
 
         The limit is the ruling's own: this Manager cannot re-derive the operator,
         so it checks the class token the caller carried. This verb's authority
