@@ -30,19 +30,28 @@ ACTION_STATES = ("pending", "running", *TERMINAL)
 # The preserved event vocabulary, plus REFUSED: the model had no actor gate and
 # so no audit row for a refusal; A-03/A-05 require one. Named here, not invented
 # per call site.
+#
+# F13 split it: ``ACTION_EVENTS`` is the closed set an *action row* can produce,
+# and ``core.EVENT_TABLE`` is a projection onto it. `finish_action` writes those
+# words without validating them (a record must not be lost to a missing word); a
+# test keeps this tuple and that table in step. ``EVENT_UNMAPPED`` — core's
+# fallback — is deliberately absent: it is not a word in the vocabulary, it is
+# the evidence that a cell was missing.
+ACTION_EVENTS = (
+    "SPAWN", "SPAWN_FAILED", "SPAWN_TIMEOUT",
+    "WAKE", "WAKE_FAILED", "WAKE_TIMEOUT",
+    "FREEZE", "FREEZE_FAILED", "FREEZE_TIMEOUT",
+    "RESCUE", "RESCUE_FAILED", "RESCUE_TIMEOUT",
+    "TEARDOWN", "TEARDOWN_PARTIAL", "TEARDOWN_TIMEOUT",
+    "UI_RESTART", "UI_RESTART_FAILED", "UI_RESTART_TIMEOUT",
+    "REFUSED",
+)
+
 EVENTS = (
-    "SPAWN",
-    "SPAWN_FAILED",
-    "FREEZE",
-    "FREEZE_FALLBACK_RESCUE",
-    "RESCUE",
-    "TEARDOWN",
-    "TEARDOWN_PARTIAL",
-    "UI_RESTART",
-    "UI_RESTART_FAILED",
+    "FREEZE_FALLBACK_RESCUE",  # the engine's own word, kept verbatim
     "CREDENTIAL_REVOKE_PARTIAL",
     "CREDENTIAL_RECONCILE",
-    "REFUSED",
+    *ACTION_EVENTS,
 )
 
 CREDENTIAL_STATES = ("pending", "open", "revoked", "failed")

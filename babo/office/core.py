@@ -17,6 +17,11 @@ The frozen ledger is the specification; this module is the first slice of it
   ``unknown`` with a note, never resolved by preference.
 - **Records are durable** (R-03, R-08). The action row and its audit row are
   written in the same transaction; the in-memory view is not the record.
+- **The event word is a projection of (verb, state)** (F13). One table decides it,
+  every write path asks that table, and no branch chooses a word for itself; the
+  word's set is closed in the store, and the table is total over the verbs and
+  the terminal states by test — with a named fallback at write time so a missing
+  cell is audible instead of fatal.
 - **Nothing here opens the podman socket.** ``runtime.py`` does, and under D-10
   it lives in ``babo-core``. No runtime handle crosses the Office interface.
 
@@ -35,6 +40,7 @@ Manager still initiates nothing on its own.**
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import threading
@@ -42,7 +48,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
+from types import MappingProxyType
+from typing import Callable, Mapping
 
 from babo.office import model
 from babo.office.api import ACTIONS, TERMINAL, ActionRecord
@@ -59,6 +66,8 @@ from babo.office.runtime import (
     RuntimeVerdictError,
     UnwiredAgentControl,
 )
+
+_LOG = logging.getLogger(__name__)
 
 # Labels a rendered agent pod carries; the runtime is searched by these.
 MANAGED_LABEL = "babo.managed"
@@ -154,9 +163,9 @@ def decide(verb: str, facts: ContainerFacts | None, identity: Identity | None,
                 f"restart-ui acts on {UI_POD}, not {handle!r}; the handle is the pod's name"
             )
         if facts is None:
-            return Refusal(f"nothing to restart: no {UI_POD} pod")
+            return Refusal(f"nothing to restart-ui: no {UI_POD} pod")
         if not facts.alive:
-            return Refusal(f"nothing to restart: {UI_POD} is {facts.state}, not alive")
+            return Refusal(f"nothing to restart-ui: {UI_POD} is {facts.state}, not alive")
         return Permit()
     if verb == "freeze":
         if facts is None:
@@ -367,16 +376,19 @@ class NativeManager:
         # absence is a refusal, written down (U-03), not a warning.
         if not actor or not actor.strip():
             return self._refuse(handle, action, actor="<none>", actor_source="", reason=reason,
-                                detail=f"no approval recorded for {handle} (asked by <none>)")
+                                detail=f"no approval recorded for {action!r} on {handle} "
+                                       "(asked by <none>)")
         if not actor_source or not actor_source.strip():
             # F-7 as a gate: a name without provenance is a string that satisfied
             # a check, not an identity. Its own detail, not the missing-actor one.
             return self._refuse(handle, action, actor=actor, actor_source="", reason=reason,
-                                detail=f"no actor source recorded for {handle} (asked by {actor}); "
+                                detail=f"no actor source recorded for {action!r} on {handle} "
+                                       f"(asked by {actor}); "
                                        "a name without provenance is not an identity")
         if not reason or not reason.strip():
             return self._refuse(handle, action, actor=actor, actor_source=actor_source, reason="",
-                                detail=f"no reason recorded for {handle} ({_asked(actor, actor_source)})")
+                                detail=f"no reason recorded for {action!r} on {handle} "
+                                       f"({_asked(actor, actor_source)})")
 
         identity = self._identity_of(handle) if self._identity_of else None
         launch = self.store.launch(handle) or {}
@@ -426,7 +438,7 @@ class NativeManager:
             self.store.finish_action(
                 row.id, state="refused", at=self.clock(),
                 said=f"action {claimed} is already pending for {handle} ({action}); not accepted",
-                event="REFUSED", identity=identity.identity if identity else "",
+                event=_event(action, "refused"), identity=identity.identity if identity else "",
             )
             return row.id
         self._executor(lambda: self._run(row.id))
@@ -447,15 +459,14 @@ class NativeManager:
             return
         identity = self._identity_of(row.handle) if self._identity_of else None
         try:
-            state, said, event = self._execute(row, identity)
+            state, said = self._execute(row, identity)
         except RuntimeVerdictError as exc:
             # F12: the runtime answered and the answer was a failure. A verdict
             # arrived, so `timeout` would be a lie; `failed` is the word, and the
             # sentence still refuses to claim the effect. This branch must stay above
             # the RuntimeUnavailableError one: it is a subclass, and the base handler
             # would otherwise swallow it back into `timeout`.
-            state, said, event = ("failed", f"{exc}; the effect is not asserted",
-                                  _event(row.verb, "failed"))
+            state, said = "failed", f"{exc}; the effect is not asserted"
         except ControlUnavailableError as exc:
             # F10 (nime's ruling, grounded on the contract): this is not one of
             # `timeout`'s two sites — nothing expired, and a verdict did arrive, from
@@ -463,8 +474,7 @@ class NativeManager:
             # never dispatched and `refused` is the word. The port's own sentence is
             # kept verbatim, because "nothing was attempted" is the fact and the
             # state word must not add a second one.
-            state, said, event = ("refused", f"{exc}; nothing was attempted",
-                                  _event(row.verb, "refused"))
+            state, said = "refused", f"{exc}; nothing was attempted"
         except RuntimeUnavailableError as exc:
             # F10/F12: this bucket has three members — the tool absent, a timeout, and
             # an exit with a message none of the markers names. "Could not be read" is
@@ -473,9 +483,8 @@ class NativeManager:
             # says what is true of all three and lets the exception carry the
             # specifics. (`_wait_absent` keeps "could not be read" because there the
             # read did not answer the question it was asked.)
-            state, said, event = ("timeout",
-                                  f"the command returned no usable verdict ({exc}); effect unstated",
-                                  _event(row.verb, "timeout"))
+            state, said = ("timeout",
+                           f"the command returned no usable verdict ({exc}); effect unstated")
         except Exception as exc:
             # It raised inside the executor: the action was dispatched and then
             # interrupted before a verdict, so whether it took effect is unknown.
@@ -484,17 +493,25 @@ class NativeManager:
             # comment here read "a decision path must never guess; it records" above a
             # line that guessed; the guesses were the two handlers above.
             detail = f"{type(exc).__name__}: {exc}"[:200]
-            state, said, event = ("failed",
-                                  f"{detail}; dispatched and interrupted before a verdict, "
-                                  "so whether it took effect is unknown",
-                                  _event(row.verb, "failed"))
-        self._finish(row, state, said, event, identity.identity if identity else "")
+            state, said = ("failed",
+                           f"{detail}; dispatched and interrupted before a verdict, "
+                           "so whether it took effect is unknown")
+        # F13: one classifier, one call. No branch above chooses a word; the word is
+        # a projection of the pair this row already carries.
+        self._finish(row, state, said, _event(row.verb, state),
+                     identity.identity if identity else "")
 
-    def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[str, str, str]:
+    def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[str, str]:
+        """(state, said) for one dispatched action. The event word is not here.
+
+        F13: a word chosen inside a branch is a second list of words, and it drifts
+        from the first one exactly where the branch is most specific. The caller
+        derives the word from the pair it just settled.
+        """
         handle, verb = row.handle, row.verb
         if verb in ("spawn", "wake"):
             if identity is None:
-                return "refused", f"no identity/channel recorded for {handle}; cannot {verb}", "REFUSED"
+                return "refused", f"no identity/channel recorded for {handle}; cannot {verb}"
             # The decision was made from facts read at `act()` time; this thread
             # runs later, so the world is re-read before the one call that makes a
             # pod (Bomu's D12-10e2: a direct `_execute` must not run a second one).
@@ -502,17 +519,17 @@ class NativeManager:
             if existing is not None and existing.alive:
                 said = (f"{handle} is already alive; nothing to wake" if verb == "wake"
                         else f"{handle} is already alive; nothing to spawn (existing pod)")
-                return "succeeded", said, "SPAWN"
+                return "succeeded", said
             if self._spec_for is None:
                 return ("failed",
                         f"{verb} cannot run: no pod renderer is configured for {handle} "
-                        "(spec_for is not wired)", "SPAWN_FAILED")
+                        "(spec_for is not wired)")
             facts = self.runtime.run(self._spec_for(handle, identity))
             self.store.record_launch(handle, boot_id=self.boot_id, identity=identity.identity,
                                      state="alive")
             where = f" at {facts.ip}" if facts.ip else ""
             done = "spawned" if verb == "spawn" else "woke"
-            return "succeeded", f"{done} {handle}{where}", "SPAWN"
+            return "succeeded", f"{done} {handle}{where}"
 
         if verb == "freeze":
             self._agent_control.request_standdown(handle)
@@ -521,10 +538,10 @@ class NativeManager:
                 # F-8: no verdict arrived; that is `timeout`, not `failed` (L-02).
                 return ("timeout",
                         f"runtime could not be read while waiting for {handle} to stand down; "
-                        "the outcome is unknown", "FREEZE")
+                        "the outcome is unknown")
             if waited != "absent":
                 return ("timeout", f"stand-down did not complete for {handle}; the pod is still "
-                                   "present and the outcome is unknown", "FREEZE")
+                                   "present and the outcome is unknown")
             report = self.ledger.revoke_all(handle, "teardown")
             # F-1: the core released this pod; the agent did not report an ending.
             # `idle` is the session processor's word and must not be borrowed here.
@@ -534,7 +551,7 @@ class NativeManager:
             said = f"froze {handle}: pod released, work preserved"
             if report.failed:
                 said += f"; {report.failed} credential(s) could not be revoked"
-            return "succeeded", said, "FREEZE"
+            return "succeeded", said
 
         if verb == "rescue":
             self._agent_control.request_rescue(handle)
@@ -543,10 +560,10 @@ class NativeManager:
                 # F-8: the same closed definition applies to rescue.
                 return ("timeout",
                         f"runtime could not be read while waiting for {handle} to rescue; "
-                        "the outcome is unknown", "RESCUE")
+                        "the outcome is unknown")
             if waited != "absent":
                 return ("timeout", f"rescue did not complete for {handle}; the pod is still "
-                                   "present and the outcome is unknown", "RESCUE")
+                                   "present and the outcome is unknown")
             report = self.ledger.revoke_all(handle, "relaunch")
             self.store.record_launch(handle, boot_id=self.boot_id,
                                      identity=identity.identity if identity else "",
@@ -555,7 +572,7 @@ class NativeManager:
                     "(new credentials are minted at the next wake)")
             if report.failed:
                 said += f"; {report.failed} credential(s) could not be revoked"
-            return "succeeded", said, "RESCUE"
+            return "succeeded", said
 
         if verb == "restart-ui":
             # L-10. Replace the pod: the old process dies with the sessions it
@@ -568,27 +585,23 @@ class NativeManager:
             if self._ui_spec is None:
                 return ("failed",
                         f"restart-ui cannot run: no UI pod renderer is configured for {UI_POD} "
-                        "(ui_spec is not wired); the old pod was not touched",
-                        "UI_RESTART_FAILED")
+                        "(ui_spec is not wired); the old pod was not touched")
             try:
                 self.runtime.remove(UI_POD)
             except RuntimeUnavailableError as exc:
                 return ("failed",
-                        f"restart-ui did not replace {UI_POD}: the old pod could not be removed: {exc}",
-                        "UI_RESTART_FAILED")
+                        f"restart-ui did not replace {UI_POD}: the old pod could not be removed: {exc}")
             try:
                 facts = self.runtime.run(self._ui_spec())
             except Exception as exc:  # the old pod is already gone; say both facts
                 return ("failed",
                         f"restart-ui removed the old {UI_POD} pod but the new one did not start "
                         f"({type(exc).__name__}: {exc}); the UI is down and its old sessions "
-                        "are gone",
-                        "UI_RESTART_FAILED")
+                        "are gone")
             where = f" at {facts.ip}" if facts.ip else ""
             return ("succeeded",
                     f"replaced {UI_POD}{where}; sessions minted before it died with the old "
-                    "process (UI-initiated, Manager-executed, no channel)",
-                    "UI_RESTART")
+                    "process (UI-initiated, Manager-executed, no channel)")
 
         if verb == "destroy":
             report = self.ledger.revoke_all(handle, "teardown")
@@ -608,7 +621,7 @@ class NativeManager:
             try:
                 self.runtime.remove(handle)
             except RuntimeUnavailableError as exc:
-                return "failed", f"destroy of {handle} did not remove the pod: {exc}", "TEARDOWN_PARTIAL"
+                return "failed", f"destroy of {handle} did not remove the pod: {exc}"
             self.store.record_launch(handle, boot_id=self.boot_id,
                                      identity=identity.identity if identity else "",
                                      state="inactive", ending="destroyed")
@@ -617,10 +630,9 @@ class NativeManager:
                 said += f" except {report.failed} of {report.total}{mesh_note}"
             else:
                 said += mesh_note
-            return ("failed" if partial else "succeeded"), said, (
-                "TEARDOWN_PARTIAL" if partial else "TEARDOWN")
+            return ("failed" if partial else "succeeded"), said
 
-        return "refused", f"unknown action {verb!r}", "REFUSED"
+        return "refused", f"unknown action {verb!r}"
 
     # -- small helpers --------------------------------------------------
     def _finish(self, row: ActionRow, state: str, said: str, event: str, identity: str = "") -> None:
@@ -638,7 +650,7 @@ class NativeManager:
             actor_source=actor_source, reason=reason, boot_id=self.boot_id, at=created,
         )
         self.store.finish_action(row.id, state="refused", said=detail, at=created,
-                                 event="REFUSED", identity=identity)
+                                 event=_event(action, "refused"), identity=identity)
         return row.id
 
     def _settle(self, handle: str, action: str, actor: str, actor_source: str, reason: str,
@@ -648,7 +660,12 @@ class NativeManager:
             action_id=secrets.token_hex(12), handle=handle, verb=action, actor=actor,
             actor_source=actor_source, reason=reason, boot_id=self.boot_id, at=created,
         )
-        event = "SPAWN" if action in ("spawn", "wake") else _event(action, state)
+        # F13: the same table `_run` asks. The old line carried its own
+        # `("spawn", "wake")` word branch, which made a wake no-op say SPAWN while
+        # every other wake row said WAKE — one vocabulary with two answers for one
+        # input. With the table, a resolved spawn is SPAWN and a resolved wake is
+        # WAKE, both from the cell every other row of that verb reads.
+        event = _event(action, state)
         self.store.finish_action(row.id, state=state, said=said, at=created,
                                  event=event, identity=identity)
         return row.id
@@ -731,20 +748,86 @@ def _asked(actor: str, source: str) -> str:
     return f"asked by {actor} via {source}" if source else f"asked by {actor}"
 
 
+# The one projection from (verb, state) to an event word (F13).
+#
+# The word is the outcome as a suffix on the verb-family base (``SPAWN``,
+# ``WAKE``, ``FREEZE``, ``RESCUE``, ``TEARDOWN``, ``UI_RESTART``), with
+# ``REFUSED`` bare as the one non-event. The closed set those words belong to is
+# the store's (``audit.ACTION_EVENTS``), and this table is the only thing allowed
+# to choose a word for an action row: every write path asks it (``_run``,
+# ``_settle``, ``_refuse``, and the in-flight duplicate). Totality over
+# ``ACTIONS x TERMINAL`` is checked by a test, not by construction here: F13's
+# ruling put the raise in the test and the belt below, because a missing cell
+# must not abort an action and a record must not be lost to it.
+
+# Not a word in the vocabulary: it is the evidence that a cell was missing. It is
+# writable (the action completes and the row is kept) and it is meant to be
+# found, which is why it does not look like any verb's outcome.
+EVENT_FALLBACK = "EVENT_UNMAPPED"
+
+EVENT_TABLE: Mapping[tuple[str, str], str] = MappingProxyType({
+    # spawn: the first pod for a handle.
+    ("spawn", "succeeded"): "SPAWN",
+    ("spawn", "failed"): "SPAWN_FAILED",
+    ("spawn", "timeout"): "SPAWN_TIMEOUT",
+    # wake: a pod for a handle that already had a workspace. Its own base, never
+    # SPAWN. The *effect* branch in `_execute` is shared (`("spawn", "wake")`),
+    # because the effect is one; the *word* is not, because the event column is
+    # the closed, validated one while the verb column is an input string. A
+    # vocabulary that merges two of its own inputs is a lossy validator: a reader
+    # scanning the event column would lose a door the row's unvalidated field
+    # still knows, and would have to trust that field to get it back. F9's
+    # literals stay parked — this is a word, not a branch.
+    ("wake", "succeeded"): "WAKE",
+    ("wake", "failed"): "WAKE_FAILED",
+    ("wake", "timeout"): "WAKE_TIMEOUT",
+    # freeze / rescue: the agent handshake. A wait that timed out did not freeze
+    # anything that the word ``FREEZE`` may claim, and the same for rescue.
+    ("freeze", "succeeded"): "FREEZE",
+    ("freeze", "failed"): "FREEZE_FAILED",
+    ("freeze", "timeout"): "FREEZE_TIMEOUT",
+    ("rescue", "succeeded"): "RESCUE",
+    ("rescue", "failed"): "RESCUE_FAILED",
+    ("rescue", "timeout"): "RESCUE_TIMEOUT",
+    # destroy: ``PARTIAL`` for a teardown that ran and did not finish (the
+    # revocation happens first, so a failed destroy has already done part of
+    # itself, and there is deliberately no ``TEARDOWN_FAILED``); ``TIMEOUT`` for
+    # one that never answered, which asserts nothing about how far it got.
+    ("destroy", "succeeded"): "TEARDOWN",
+    ("destroy", "failed"): "TEARDOWN_PARTIAL",
+    ("destroy", "timeout"): "TEARDOWN_TIMEOUT",
+    # restart-ui: the pod replacement (L-10).
+    ("restart-ui", "succeeded"): "UI_RESTART",
+    ("restart-ui", "failed"): "UI_RESTART_FAILED",
+    ("restart-ui", "timeout"): "UI_RESTART_TIMEOUT",
+    # Every verb: a refusal is a non-event — the core declined before acting — so
+    # it gets no verb-family word. The bare word is the marker that says *this
+    # row is not an event*, and it is only honest beside a sentence that names
+    # the verb, which every `_refuse` caller must write.
+    ("spawn", "refused"): "REFUSED",
+    ("wake", "refused"): "REFUSED",
+    ("freeze", "refused"): "REFUSED",
+    ("rescue", "refused"): "REFUSED",
+    ("destroy", "refused"): "REFUSED",
+    ("restart-ui", "refused"): "REFUSED",
+})
+
+
 def _event(verb: str, state: str) -> str:
-    if state == "refused":
-        return "REFUSED"
-    if verb in ("spawn", "wake"):
-        return "SPAWN" if state == "succeeded" else "SPAWN_FAILED"
-    if verb == "freeze":
-        return "FREEZE"
-    if verb == "rescue":
-        return "RESCUE"
-    if verb == "destroy":
-        return "TEARDOWN" if state == "succeeded" else "TEARDOWN_PARTIAL"
-    if verb == "restart-ui":
-        return "UI_RESTART" if state == "succeeded" else "UI_RESTART_FAILED"
-    return "REFUSED"
+    """(verb, state) -> the one word for this row.
+
+    Total by a test over ``ACTIONS x TERMINAL``. Not total by construction here,
+    on purpose: at write time a missing cell must not raise into the executor and
+    must not borrow a word that means something else, so it writes
+    ``EVENT_FALLBACK`` and says so at warning level. Blindness stays audible; the
+    action still completes; the row is found later by its own word.
+    """
+    word = EVENT_TABLE.get((verb, state))
+    if word is None:
+        _LOG.warning("no event word mapped for (%r, %r); writing %s and continuing",
+                     verb, state, EVENT_FALLBACK)
+        return EVENT_FALLBACK
+    return word
 
 
 def manager_for(cfg: object = None) -> NativeManager:
