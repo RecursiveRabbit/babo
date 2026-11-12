@@ -813,3 +813,28 @@ def test_every_precondition_refusal_names_the_verb_it_refused(
     assert record.state == "refused"
     assert verb in record.said, record.said
     assert _last_event(manager, handle) == "REFUSED"
+
+
+def test_a_branch_that_returns_a_word_outside_the_contract_still_settles_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # F15: the state word is checked where `_run` receives it. A future branch
+    # returning `running` used to raise out of `_finish` *after* the effect, leaving
+    # the row at `running` for ever — the record of an action that happened, gone.
+    # It is now settled as a failure that names the core's own defect.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def running_branch(self, row, identity):  # the branch that has not learned the contract
+        return "running", "the pod was made and the branch forgot its word"
+
+    monkeypatch.setattr(NativeManager, "_execute", running_branch)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert "non-terminal verdict 'running'" in record.said
+    assert "settled as failed rather than orphaned" in record.said
+    # settled, not orphaned: the row has a finish stamp and a terminal word
+    stored = manager.store.get_action(record.id)
+    assert stored is not None and stored.finished_at is not None
+    assert _last_event(manager, "agent-a") == "SPAWN_FAILED"

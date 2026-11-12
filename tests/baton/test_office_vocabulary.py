@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from typing import get_args
 
 import pytest
 
@@ -31,6 +32,7 @@ from babo.office.core import (
     EVENT_BASES,
     EVENT_FALLBACK,
     EVENT_TABLE,
+    ActionState,
     _event,
 )
 
@@ -116,6 +118,15 @@ def test_the_new_words_are_exactly_this_landings_declaration() -> None:
     }
     assert set(ACTION_EVENTS) - set(STORE_EVENTS) == introduced
     assert set(STORE_EVENTS) - set(ACTION_EVENTS) == preserved_only
+
+
+def test_the_state_word_type_is_the_runtime_set() -> None:
+    # F15: `ActionState` restates `TERMINAL`, because a Literal has to be literal.
+    # The restatement is pinned here so it cannot drift: a fifth terminal state
+    # added to the contract but not to the type would pass every runtime test and
+    # fail review, and a state added to the type alone would let a branch write a
+    # word the store refuses.
+    assert set(get_args(ActionState)) == set(TERMINAL)
 
 
 def test_the_fallback_is_not_a_word_in_the_vocabulary() -> None:

@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
+from typing import Callable, Literal, Mapping
 
 from babo.office import model
 from babo.office.api import ACTIONS, TERMINAL, ActionRecord
@@ -118,6 +118,13 @@ class Resolved:
 
 
 Decision = Refusal | Permit | Resolved
+
+# The state word a settled row may carry, as a type. `api.TERMINAL` is the runtime
+# set and this is its static twin, so a branch that returns a fifth word fails at
+# review rather than at run time. This is the one place the closed set is
+# restated, and a restatement is what drifts, so a test pins the two together
+# (`get_args(ActionState) == TERMINAL`).
+ActionState = Literal["succeeded", "failed", "refused", "timeout"]
 
 
 def decide(verb: str, facts: ContainerFacts | None, identity: Identity | None,
@@ -496,12 +503,22 @@ class NativeManager:
             state, said = ("failed",
                            f"{detail}; dispatched and interrupted before a verdict, "
                            "so whether it took effect is unknown")
-        # F13: one classifier, one call. No branch above chooses a word; the word is
-        # a projection of the pair this row already carries.
+        # F15: the state word is checked here, at the handoff, before the record is
+        # written. A branch that returns a word outside the contract is a defect in
+        # this file, and `_finish`'s raise would take the record down with it — after
+        # an effect that already happened. So the row is still settled, as a failure
+        # whose sentence says what the core did; `_finish` keeps the raise as the belt
+        # for any road that bypasses this check. The static half (`ActionState`) is
+        # what runs before the effect: it fails the branch at review.
+        if state not in TERMINAL:
+            state, said = "failed", (
+                f"the core produced a non-terminal verdict {state!r}; "
+                "the row is settled as failed rather than orphaned"
+            )
         self._finish(row, state, said, _event(row.verb, state),
                      identity.identity if identity else "")
 
-    def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[str, str]:
+    def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[ActionState, str]:
         """(state, said) for one dispatched action. The event word is not here.
 
         F13: a word chosen inside a branch is a second list of words, and it drifts
@@ -635,9 +652,13 @@ class NativeManager:
         return "refused", f"unknown action {verb!r}"
 
     # -- small helpers --------------------------------------------------
-    def _finish(self, row: ActionRow, state: str, said: str, event: str, identity: str = "") -> None:
+    def _finish(self, row: ActionRow, state: ActionState, said: str, event: str,
+                identity: str = "") -> None:
         if state not in TERMINAL:
-            # F-6: an unknown verdict word is a defect, not something to coerce.
+            # F-6: an unknown verdict word is a defect, not something to coerce. F15
+            # keeps the raise and moves the *check* to `_run`'s handoff, so no effect
+            # is ever recorded by a raise: this branch is the belt for a caller that
+            # does not go through `_run`.
             raise ValueError(f"the core produced a non-terminal verdict {state!r}; refusing to write it")
         self.store.finish_action(row.id, state=state, said=said, at=self.clock(),
                                  event=event, identity=identity)
