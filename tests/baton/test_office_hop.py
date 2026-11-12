@@ -262,7 +262,8 @@ def test_the_row_the_ui_reads_names_who_asked_and_why() -> None:
     assert read == 200
     assert payload == {"state": "succeeded", "detail": "replaced the UI pod; sessions invalidated",
                        "id": "restart-7", "handle": service.UI_POD, "action": "restart-ui",
-                       "actor": "evans", "actor_source": "host-wg", "reason": "sessions leaked"}
+                       "actor": "evans", "actor_source": "host-wg", "reason": "sessions leaked",
+                       "created_at": "2026-01-01T00:00:00+00:00"}
 
 
 def test_the_client_passes_the_audit_fields_through_untouched() -> None:

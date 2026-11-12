@@ -73,6 +73,7 @@ class _ActionRowLike(Protocol):
     actor: str
     actor_source: str
     reason: str
+    created_at: str
 
 
 @runtime_checkable
@@ -231,7 +232,7 @@ class ManagerService:
         return 200, {"state": record.state, "detail": record.said, "id": record.id,
                      "handle": record.handle, "action": record.action,
                      "actor": record.actor, "actor_source": record.actor_source,
-                     "reason": record.reason}
+                     "reason": record.reason, "created_at": record.created_at}
 
     # -- the restart door's read half ------------------------------------
     def restart_latest(self, peer: str, limit: int = 1) -> tuple[int, dict[str, Any]]:
@@ -253,9 +254,11 @@ class ManagerService:
         - ``403`` the caller is not the UI pod. The write admits two doors; this
           read admits one, because the operator's host does not need to read the
           pod's own history.
-        - ``503`` the store is unreadable, or the core produced a state word this
-          surface cannot render. The office looks broken rather than clean: "no
-          restart" is a claim, and a broken read cannot make it.
+        - ``503`` the store cannot answer — and it says which of two different
+          things went wrong. A core that exposes no action store at all gets one
+          sentence; a store that is present and raises gets another, carrying its own
+          words. The office looks broken rather than clean either way: "no restart"
+          is a claim, and a read that did not happen cannot make it.
         - ``404`` the store is readable and holds no such row. Said out loud, so a
           consumer that is really a yes/no has to answer "there is no restart".
         - ``200`` ``{"actions": [...], "count": n}``, newest first, each row in the
@@ -271,13 +274,21 @@ class ManagerService:
                                      f"the latest {OPERATOR_ACTIONS[0]}, not a listing")}
         store = getattr(self.core, "store", None)
         if not isinstance(store, _ActionStore):
-            return 503, {"detail": "the core's store is unreadable; the office cannot say whether a restart happened"}
+            # Absence, said as absence, and only that. `@runtime_checkable` checks
+            # that the attribute is *there*; it is not a signature check, and wrong
+            # shapes walk through it. So this is the cheap pre-check and the call
+            # below is the real one — which is why the two failures get two
+            # sentences rather than one sentence pretending to be a shape check.
+            return 503, {"detail": ("the core exposes no action store; the office cannot say whether "
+                                     "a restart happened")}
         try:
             # Parameterised here, inside, and nowhere else: the pod is the row's
             # handle and the door is the row's verb, both fixed by this module.
             rows = list(store.actions(handle=UI_POD, verbs=OPERATOR_ACTIONS, limit=limit))
         except Exception as exc:
-            return 503, {"detail": f"the core's store is unreadable: {exc}"}
+            # A store that is present and cannot answer is a different fact from a
+            # core that never had one, and the two must not share a sentence.
+            return 503, {"detail": f"the core's store could not be read: {exc}"}
         if not rows:
             return 404, {"detail": f"no {OPERATOR_ACTIONS[0]} row is recorded here; there is no restart to read"}
         for row in rows:
@@ -296,8 +307,13 @@ class ManagerService:
         read is already on the wire. Two endpoints teaching two clients two names
         is the failure, so this projects field for field the same shape — if anyone
         ever moves it, they move both reads together.
+
+        `created_at` is here because the endpoint's purpose needs it: a pod that came
+        up inside a restart cannot otherwise tell *the restart that made me* from *a
+        restart aimed at me*. It also makes "newest first" falsifiable by the caller
+        instead of a claim the door makes about itself.
         """
         return {"state": row.state, "detail": row.said, "id": row.id,
                 "handle": row.handle, "action": row.verb,
                 "actor": row.actor, "actor_source": row.actor_source,
-                "reason": row.reason}
+                "reason": row.reason, "created_at": row.created_at}

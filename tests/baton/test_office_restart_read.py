@@ -125,6 +125,8 @@ def test_the_join_a_row_the_core_wrote_is_read_back_by_the_service(tmp_path: Pat
     assert row["state"] == "succeeded"
     assert row["actor"] == "evans" and row["actor_source"] == "terminal"
     assert row["reason"] == "sessions leaked"
+    assert row["created_at"], "a reader must be able to tell this restart from a later one"
+    assert datetime.fromisoformat(row["created_at"])
     assert "sessions minted before it died with the old process" in row["detail"]
 
 
@@ -155,6 +157,11 @@ def test_the_newest_row_comes_first(tmp_path: Path) -> None:
     assert status == 200 and payload["count"] == 2
     assert [row["id"] for row in payload["actions"]] == [second, first]
     assert [row["reason"] for row in payload["actions"]] == ["second", "first"]
+    # "Newest first" is falsifiable by the caller rather than a claim the door
+    # makes about itself: the timestamps have to run no later, earlier on.
+    assert not any(row["created_at"] is None for row in payload["actions"])
+    stamps = [row["created_at"] for row in payload["actions"]]
+    assert stamps == sorted(stamps, reverse=True)
 
 
 # -- service: the four answers ---------------------------------------------
@@ -182,7 +189,18 @@ def test_no_restart_row_is_404_and_says_so(tmp_path: Path) -> None:
     assert "actions" not in payload
 
 
-def test_an_unreadable_store_is_503_not_an_empty_answer(tmp_path: Path) -> None:
+def test_absence_of_a_store_is_503_and_says_absence() -> None:
+    # "No store" is not "no restart": a core that cannot be read is broken, and the
+    # office must look broken rather than clean.
+    svc = _svc(SimpleNamespace(health=lambda: (True, ""), agents=lambda: [], act=lambda *a, **k: "",
+                               action=lambda *a, **k: None))
+    status, payload = svc.restart_latest(UI_ADDR)
+    assert status == 503
+    assert "exposes no action store" in payload["detail"]
+    assert "actions" not in payload
+
+
+def test_a_store_that_raises_is_503_in_its_own_words(tmp_path: Path) -> None:
     manager, _ = _one_restart(tmp_path)
 
     def broken(**kwargs: Any) -> list[Any]:
@@ -192,18 +210,20 @@ def test_an_unreadable_store_is_503_not_an_empty_answer(tmp_path: Path) -> None:
 
     status, payload = _svc(manager).restart_latest(UI_ADDR)
     assert status == 503
-    assert "unreadable" in payload["detail"] and "database is locked" in payload["detail"]
+    assert "could not be read" in payload["detail"] and "database is locked" in payload["detail"]
     assert "actions" not in payload
 
 
-def test_a_core_with_no_store_at_all_is_503(tmp_path: Path) -> None:
-    # "No store" is not "no restart": a core that cannot be read is broken, and the
-    # office must look broken rather than clean.
-    manager, _ = _one_restart(tmp_path)
-    svc = _svc(SimpleNamespace(health=lambda: (True, ""), agents=lambda: [], act=lambda *a, **k: "",
-                               action=lambda *a, **k: None))
+def test_a_store_whose_actions_is_not_callable_is_a_read_failure_not_an_absence() -> None:
+    # `@runtime_checkable` checks that the attribute is *there*, not that it is a
+    # store: this object has `actions` and is nothing like a store. The pre-check
+    # lets it through by design, and the call reports it — which is why the two
+    # failures must not share one sentence.
+    svc = _svc(SimpleNamespace(store=SimpleNamespace(actions=("not", "callable"))))
     status, payload = svc.restart_latest(UI_ADDR)
-    assert status == 503 and "store is unreadable" in payload["detail"]
+    assert status == 503
+    assert "could not be read" in payload["detail"]
+    assert "not callable" in payload["detail"]
 
 
 def test_a_state_word_the_surface_cannot_render_is_503() -> None:

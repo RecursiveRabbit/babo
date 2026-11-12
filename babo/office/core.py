@@ -322,7 +322,7 @@ class NativeManager:
             raise UnknownActionError(f"no such action: {action_id}")
         return ActionRecord(id=row.id, handle=row.handle, action=row.verb, state=row.state,
                            said=row.said, actor=row.actor, actor_source=row.actor_source,
-                           reason=row.reason)
+                           reason=row.reason, created_at=row.created_at)
 
     # -- the one write boundary -----------------------------------------
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",

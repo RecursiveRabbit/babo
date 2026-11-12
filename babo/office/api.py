@@ -113,6 +113,12 @@ class ActionRecord:
     actor: str = ""
     actor_source: str = ""
     reason: str = ""
+    # When the row was created, projected for the same reason and under the same
+    # rule: a reader that came up inside a restart has to tell *the restart that
+    # made me* from *a restart aimed at me*, and without a timestamp it cannot.
+    # The column already exists on the store row, so this is a projection and not
+    # new state.
+    created_at: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in ("pending", "running", *TERMINAL):

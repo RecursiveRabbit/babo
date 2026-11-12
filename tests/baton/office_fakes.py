@@ -32,6 +32,11 @@ class FakeCore:
     actions: dict[str, ActionRecord] = field(default_factory=dict)
     audit: list[tuple[str, str, str, str]] = field(default_factory=list)
     _next: int = 0
+    # One deterministic stamp for every row this fixture writes. The real core
+    # stamps from its own clock; a fixture that left the field empty would let the
+    # wire shape pass a test while carrying a value the product never produces —
+    # so this is a fixed value, not an empty one.
+    stamp: str = "2026-01-01T00:00:00+00:00"
 
     def health(self) -> tuple[bool, str]:
         return (False, self.unavailable) if self.unavailable else (True, "fake core")
@@ -51,7 +56,8 @@ class FakeCore:
         not an identity. The fixture carries both onto the row so the hop's read
         path is tested against a shape the product can actually produce.
         """
-        who = {"actor": actor, "actor_source": actor_source, "reason": reason}
+        who = {"actor": actor, "actor_source": actor_source, "reason": reason,
+               "created_at": self.stamp}
         if not actor or not actor_source:
             # R5: no actor, no effect — refused by name, not "failed".
             self._next += 1
@@ -69,7 +75,8 @@ class FakeCore:
                 self.actions[action_id] = ActionRecord(
                     id=action_id, handle=existing.handle, action=existing.action, state="refused",
                     said=f"action {action_id} is already pending for {existing.handle} ({existing.action}); not accepted",
-                    actor=existing.actor, actor_source=existing.actor_source, reason=existing.reason)
+                    actor=existing.actor, actor_source=existing.actor_source, reason=existing.reason,
+                    created_at=existing.created_at)
                 return action_id
             return action_id
         if self.unavailable:

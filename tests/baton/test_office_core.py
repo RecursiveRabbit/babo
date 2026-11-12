@@ -421,8 +421,14 @@ def test_unknown_action_id_is_not_found_not_a_synthesised_failure(tmp_path: Path
 
 def test_the_manager_satisfies_the_office_interface(tmp_path: Path) -> None:
     from babo.office.api import OfficeManager
+    from babo.office.service import _ActionStore
 
     assert isinstance(_manager(tmp_path, RecordingRuntime()), OfficeManager)
+    # The door's own requirement, asserted beside the interface's: the restart read
+    # reaches the store through the core, so a core that lost `.store` (or lost
+    # `actions` on it) is a door requirement broken — not something only the join
+    # test in another file would notice.
+    assert isinstance(_manager(tmp_path, RecordingRuntime()).store, _ActionStore)
     assert isinstance(_manager(tmp_path, RecordingRuntime()).action, object)
     assert ActionRecord(id="x", handle="a", action="spawn").terminal is False
 
