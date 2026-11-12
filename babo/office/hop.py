@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
 from babo.office.actors import Actor
-from babo.office.api import AGENT_ACTIONS, OPERATOR_ACTIONS, OPERATOR_SOURCE
+from babo.office.api import AGENT_ACTIONS, OPERATOR_ACTIONS, OPERATOR_ACTOR, OPERATOR_SOURCE
 
 
 @dataclass(frozen=True)
@@ -126,25 +126,26 @@ class HopClient:
         that made this call, so this client will not be alive to see a verdict
         (H-6). A `succeeded` here would be a lie told by a dead process.
         """
-        if actor.source != OPERATOR_SOURCE:
-            return HopResult(ok=False, said=(f"{actor.source!r} is not the host operator; "
-                                             f"{OPERATOR_ACTIONS[0]} is invoked by the operator derived "
-                                             f"from the authenticated host-WG session ({OPERATOR_SOURCE!r})"))
+        if actor.name != OPERATOR_ACTOR:
+            return HopResult(ok=False, said=(f"the actor is not a {OPERATOR_ACTOR} (caught {actor.name!r}); "
+                                             "the operator is derived from the authenticated host-WG "
+                                             f"session ({OPERATOR_SOURCE!r}), never supplied by the page"))
         body: dict[str, Any] = {"reason": reason, "actor": actor.name, "actor_source": actor.source}
         if action_id:
             body["action_id"] = action_id
         return self._call("POST", "/api/v1/office/ui/restart", body)
 
 
-def operator_from_session(name: str, source: str) -> Actor:
-    """Derive the host operator from the authenticated session, or refuse.
+def operator_from_session(source: str) -> Actor:
+    """Derive the operator from the authenticated session, or refuse.
 
     One place, so the surface cannot grow a second idea of who the operator is.
-    ``source`` is the session's own authenticated word; anything but the host-WG
-    door raises rather than quietly producing an actor the Manager will refuse.
+    The actor is the class token the ruling names — `host_operator` — not the
+    person's name: the person is proved at the door that admitted the session, and
+    this Manager cannot re-derive them (the ruling says so plainly). A session
+    from any other door raises rather than quietly producing a token the Manager
+    will refuse.
     """
     if source != OPERATOR_SOURCE:
         raise ValueError(f"a {source!r} session is not a host-WG session; it cannot act as the operator")
-    if not name.strip():
-        raise ValueError("the operator has no name; an anonymous restart is not admitted")
-    return Actor(name=name, source=OPERATOR_SOURCE)
+    return Actor(name=OPERATOR_ACTOR, source=OPERATOR_SOURCE)

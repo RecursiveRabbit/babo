@@ -83,25 +83,28 @@ def test_the_client_refuses_the_pod_verb_on_the_agent_path_and_from_a_session() 
     assert via_act.unavailable and "agent path" in via_act.said
 
     from_a_session = client.restart_ui("r", actor=Actor("owner", "webui-session"))
-    assert from_a_session.unavailable and "not the host operator" in from_a_session.said
+    assert from_a_session.unavailable and "not a host_operator" in from_a_session.said
     assert not calls, "neither refusal left the pod"
 
-    derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("evans", "host-wg"))
+    derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("host-wg"))
     assert derived.ok and derived.status == 202
     assert calls == [{"method": "POST", "url": "http://x/api/v1/office/ui/restart",
-                      "body": {"reason": "invalidate sessions", "actor": "evans", "actor_source": "host-wg"}}]
+                      "body": {"reason": "invalidate sessions", "actor": "host_operator",
+                               "actor_source": "host-wg"}}]
 
 
 def test_an_operator_cannot_be_derived_from_anything_but_a_host_wg_session() -> None:
-    """One place derives the operator, so the surface cannot grow a second idea."""
+    """One place derives the operator, so the surface cannot grow a second idea.
+
+    The token is the ruling's class word, not a person's name: the person is proved
+    at the door, and this side only carries the class the door proved.
+    """
     import pytest
 
     for source in ("webui-session", "channel", "terminal", ""):
         with pytest.raises(ValueError):
-            hop.operator_from_session("evans", source)
-    assert hop.operator_from_session("evans", "host-wg") == Actor("evans", "host-wg")
-    with pytest.raises(ValueError):
-        hop.operator_from_session("  ", "host-wg")
+            hop.operator_from_session(source)
+    assert hop.operator_from_session("host-wg") == Actor("host_operator", "host-wg")
 
 
 # -- service ----------------------------------------------------------------
@@ -173,24 +176,26 @@ def test_restart_ui_admits_two_doors_and_exactly_one_class() -> None:
     """L-10's standing (ruled 2026-11-11): the door is not the principal.
 
     Either admitted door may carry it — the operator's own host, or the UI pod
-    carrying the operator's derived identity — but the actor must be the host
-    operator. A stranger address is not "close enough", and a session, channel or
-    terminal cannot wear the authority even from an admitted address. Every
-    refusal happens before effect: no row, no core call.
+    carrying that operator's identity — but the actor is an allow-list of exactly
+    one class, `host_operator`. A stranger address is not "close enough", and no
+    other class (a Lead, a crew agent, a service identity, a session, a terminal)
+    gets through even from an admitted door. Every refusal happens before effect:
+    no row, no core call, and the class it caught is named.
     """
     core = _core()
     core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
 
-    refused_stranger, payload = svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "o",
+    refused_stranger, payload = svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "host_operator",
                                                           "actor_source": "host-wg"})
     assert refused_stranger == 403 and "not an admitted door" in payload["detail"]
 
-    for source in ("webui-session", "channel", "terminal"):
-        status, payload = svc.restart_ui(UI, {"reason": "r", "actor": "lead-1", "actor_source": source})
-        assert status == 403 and "not the host operator" in payload["detail"]
-
-    assert svc.restart_ui(OP, {"reason": "r", "actor": "o"})[0] == 400
+    for caught in ("lead-1", "crew-2", "babo-ui", "owner", "agent-service", ""):
+        status, payload = svc.restart_ui(UI, {"reason": "r", "actor": caught,
+                                             "actor_source": "host-wg"})
+        assert status in (400, 403)
+        if status == 403:
+            assert "not a host_operator" in payload["detail"], payload
     assert not core.audit, "no refusal above reached the core"
 
 
@@ -206,16 +211,18 @@ def test_restart_ui_is_accepted_from_either_door_and_is_best_effort() -> None:
         core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
         svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
 
-        status, payload = svc.restart_ui(door, {"reason": "invalidate sessions", "actor": "evans",
+        status, payload = svc.restart_ui(door, {"reason": "invalidate sessions", "actor": "host_operator",
                                                 "actor_source": "host-wg", "action_id": "r1"})
         assert status == 202
         assert payload["status"] == "accepted" and payload["best_effort"] is True
         assert "succeeded" in payload["note"] and "will not see" in payload["note"], (
             "the contract names what the caller will never observe")
         assert payload["status"] not in ("succeeded", "failed", "timeout")
+        # Acceptance (b): the row carries BOTH the pod's handle and the operator's
+        # class. A row with one and not the other has proved half of §8.
         assert core.audit[-1][0] == service.UI_POD, "the audit row names the pod, not a synthetic handle"
         assert core.audit[-1][1] == "restart-ui"
-        assert core.audit[-1][2:] == ("evans", "host-wg"), "the row carries the operator, not the door"
+        assert core.audit[-1][2:] == ("host_operator", "host-wg"), "the row carries the class, not a name"
 
 
 def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
@@ -223,6 +230,6 @@ def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
     core = _core()
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.act(UI, {"handle": "crew-1", "action": "restart-ui", "reason": "r",
-                                   "actor": "lead-1", "actor_source": "webui-session"})
+                                   "actor": "host_operator", "actor_source": "host-wg"})
     assert status == 403 and "host operator's verb" in payload["detail"]
     assert not core.audit, "a closed door leaves no row"

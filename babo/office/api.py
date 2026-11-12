@@ -48,16 +48,16 @@ ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
 # verbs; what narrows is the door, not the word.
 AGENT_ACTIONS = tuple(verb for verb in ACTIONS if verb != "restart-ui")
 
-# The one verb the host operator may invoke, and the only kind of caller that may
-# invoke it: an authenticated host, admitted at the host-WG door. Not a Lead, not
-# a crew agent, not a service identity (the UI pod included), not an
-# unauthenticated local process.
+# The one verb the host operator may invoke, and the class token that authorizes
+# it — an allow-list of exactly one (soro's §8 ruling, 2026-11-11). The check is
+# `actor == OPERATOR_ACTOR`, never a deny-list of the classes we happened to think
+# of: a deny-list is a row a sixth class slips past the day someone adds one.
 OPERATOR_ACTIONS = ("restart-ui",)
+OPERATOR_ACTOR = "host_operator"
 
-# The actor source the operator door admits. WireGuard admits a *host*, not a
-# person: the key proves which machine spoke, so the source word names the door
-# rather than pretending to name a human. Every other word (`webui-session`,
-# `channel`, `terminal`, an agent's own) is refused by name at that door.
+# The word the door's own authentication carries. Transport peer identity is not
+# operator authority (the ruling's first half): this names *where* the claim came
+# from — the host-WG door — while OPERATOR_ACTOR names the only class admitted.
 OPERATOR_SOURCE = "host-wg"
 
 # Terminal states, verbatim. Anything else is still in flight.

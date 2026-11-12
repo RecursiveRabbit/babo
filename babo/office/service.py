@@ -22,7 +22,7 @@ from typing import Any
 from babo.office.api import (
     AGENT_ACTIONS,
     OPERATOR_ACTIONS,
-    OPERATOR_SOURCE,
+    OPERATOR_ACTOR,
     TERMINAL,
     OfficeManager,
 )
@@ -123,13 +123,17 @@ class ManagerService:
         invalidates sessions by construction rather than by an API call reaching
         into another pod's memory.
 
-        Two admissions, one principal (ruled 2026-11-11). The door can be the host
-        operator's own (admitted at the host-WG door) or the UI pod carrying that
-        operator's identity — but the **actor must be the host operator either way**:
-        derived by the UI from the authenticated host-WG session, never accepted
-        from a request body, and never a Lead, a crew agent, a service identity or
-        an unauthenticated local process. A non-operator class is refused here,
-        before any effect: no row, no core call.
+        Two admissions, one principal (ruled 2026-11-11). The API-source check
+        guards who may reach the port; the authority check guards whose act it is,
+        and it is an allow-list of exactly one: the row must carry both
+        `handle == "babo-ui"` and `actor == "host_operator"`. Everything else — a
+        Lead, a crew agent, a service identity, a session, an unauthenticated local
+        process — is refused here **before effect**, with the class it caught named.
+
+        The limit is the ruling's own: this Manager cannot re-derive the operator,
+        so it checks the class token the caller carried. This verb's authority
+        rests on the door that authenticated the operator, and the refusal catches a
+        wrong class, not a forged one.
 
         The answer is 202 and it is **best-effort** (Bomu, H-6): replacing the pod
         kills the process that asked, so a client that died mid-request cannot be
@@ -147,13 +151,12 @@ class ManagerService:
         replay = body.get("action_id")
         if not reason or not actor or not actor_source:
             return 400, {"detail": "missing reason, actor or actor_source"}
-        if actor_source != OPERATOR_SOURCE:
-            # The door names the machine; the actor names the host operator derived
-            # from the session that door authenticated. A session, a channel, a
-            # terminal or an agent's own word is refused here by class, before any
-            # effect, so no service identity can wear the operator's authority.
-            return 403, {"detail": (f"actor_source {actor_source!r} is not the host operator; this verb "
-                                    f"admits {OPERATOR_SOURCE!r} only")}
+        if actor != OPERATOR_ACTOR:
+            # The allow-list of exactly one, and the refusal names the class it
+            # caught (soro's §8). `actor_source` says which door the claim came
+            # through; it is not the authority, and neither is the peer address.
+            return 403, {"detail": (f"the actor is not a {OPERATOR_ACTOR} (caught {actor!r}); "
+                                    f"{OPERATOR_ACTIONS[0]} carries exactly one class")}
         try:
             action_id = self.core.act(UI_POD, "restart-ui", reason, actor=actor, actor_source=actor_source,
                                       action_id=str(replay) if isinstance(replay, str) and replay else None)
