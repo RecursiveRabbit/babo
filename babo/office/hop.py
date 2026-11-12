@@ -136,6 +136,26 @@ class HopClient:
             body["action_id"] = action_id
         return self._call("POST", "/api/v1/office/ui/restart", body)
 
+    def restart_latest(self) -> HopResult:
+        """The read half of the restart door: the latest `restart-ui` row.
+
+        The replacement pod asks this on the way up, because the write half killed
+        the process that made it (H-6): this is the only way the pod that came up
+        inside the restart learns what the row says about it.
+
+        The page does not say *which* restart, so there is no handle and no verb on
+        the wire to widen later (F2, ruled 2026-11-12). `boot_id` is absent on
+        purpose and is not invented here: it is the Manager's boot, not the pod's,
+        so a pod correlating on it would look like it worked and mean something
+        else.
+
+        A failure is still a value. In particular a `404` is an *answer* — "there is
+        no restart row here" — and arrives as ``ok=False`` with the Manager's own
+        sentence, so the page can render `unknown` without a try/except deciding
+        what an empty list would have meant.
+        """
+        return self._call("GET", "/api/v1/office/ui/restart")
+
 
 def operator_from_session(name: str, source: str) -> Actor:
     """Derive the operator from the authenticated session, or refuse.

@@ -17,7 +17,7 @@ without a socket.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
 
 from babo.office.api import (
     AGENT_ACTIONS,
@@ -48,6 +48,46 @@ UI_POD = "babo-ui"
 # A body may carry these and nothing else; unknown keys are refused rather than
 # ignored, because an ignored key is a client believing it changed something.
 ACTION_FIELDS = frozenset({"handle", "action", "reason", "actor", "actor_source", "action_id"})
+
+# The restart read is bounded on purpose. The route names one thing — the latest
+# restart — and `limit` exists only because the store query underneath is
+# parameterised. A bound the caller cannot raise keeps this from quietly becoming
+# the collection endpoint the narrowing refused (F2, ruled 2026-11-12).
+RESTART_READ_MAX = 20
+
+
+class _ActionRowLike(Protocol):
+    """The fields this surface reads off one stored action row.
+
+    Declared here rather than imported from the store, and deliberately **without
+    `boot_id`**: the Manager's boot is not the UI pod's boot, so a field that invites
+    that correlation must not be part of the shape this surface is able to project
+    (contract §3). A missing field is honest; a field that appears to work is not.
+    """
+
+    id: str
+    handle: str
+    verb: str
+    state: str
+    said: str
+    actor: str
+    actor_source: str
+    reason: str
+
+
+@runtime_checkable
+class _ActionStore(Protocol):
+    """The one store read this surface makes: a parameterised, bounded query.
+
+    Not on ``OfficeManager`` because it is a store query and not a manager verb: the
+    interface stays the surface's contract, and this module keeps the read it needs
+    without widening the door for anyone else. A core with no such store is reported
+    as unreadable (503), never as an empty answer.
+    """
+
+    def actions(self, *, handle: str | None = ..., verbs: Iterable[str] | None = ...,
+                limit: int = ...) -> Sequence[_ActionRowLike]:
+        ...
 
 
 def peer_allowed(peer: str, allowed: tuple[str, ...]) -> bool:
@@ -192,3 +232,72 @@ class ManagerService:
                      "handle": record.handle, "action": record.action,
                      "actor": record.actor, "actor_source": record.actor_source,
                      "reason": record.reason}
+
+    # -- the restart door's read half ------------------------------------
+    def restart_latest(self, peer: str, limit: int = 1) -> tuple[int, dict[str, Any]]:
+        """The latest `restart-ui` row, for the pod that has to live with it.
+
+        The write half (`restart_ui`) replaces the pod and kills the process that
+        asked, so no caller ever sees its verdict from inside. This read is how the
+        replacement finds out what happened to it: after it comes up, it asks the
+        Manager for the newest row on its own door.
+
+        The narrowing is the point (F2, ruled 2026-11-12). The route names one
+        thing and this method asks for one thing: no caller-supplied handle and no
+        caller-supplied verb reaches the query, so there is nothing here that a
+        later party can widen into `?handle=…&verb=…` without editing the door.
+        `limit` is the store's parameter, bounded by this module.
+
+        Four answers, and none of them is a well-formed empty list:
+
+        - ``403`` the caller is not the UI pod. The write admits two doors; this
+          read admits one, because the operator's host does not need to read the
+          pod's own history.
+        - ``503`` the store is unreadable, or the core produced a state word this
+          surface cannot render. The office looks broken rather than clean: "no
+          restart" is a claim, and a broken read cannot make it.
+        - ``404`` the store is readable and holds no such row. Said out loud, so a
+          consumer that is really a yes/no has to answer "there is no restart".
+        - ``200`` ``{"actions": [...], "count": n}``, newest first, each row in the
+          same wire names the single-row read uses — `detail`, not `said` — and
+          never `boot_id`.
+        """
+        if not peer_allowed(peer, self.ui_peers):
+            return 403, {"detail": f"{peer} is not the UI pod"}
+        if limit < 1 or limit > RESTART_READ_MAX:
+            # A limit of zero would return exactly the empty answer §4 forbids, and
+            # an unbounded limit is the collection endpoint by another name.
+            return 400, {"detail": (f"limit is between 1 and {RESTART_READ_MAX}; this route names "
+                                     f"the latest {OPERATOR_ACTIONS[0]}, not a listing")}
+        store = getattr(self.core, "store", None)
+        if not isinstance(store, _ActionStore):
+            return 503, {"detail": "the core's store is unreadable; the office cannot say whether a restart happened"}
+        try:
+            # Parameterised here, inside, and nowhere else: the pod is the row's
+            # handle and the door is the row's verb, both fixed by this module.
+            rows = list(store.actions(handle=UI_POD, verbs=OPERATOR_ACTIONS, limit=limit))
+        except Exception as exc:
+            return 503, {"detail": f"the core's store is unreadable: {exc}"}
+        if not rows:
+            return 404, {"detail": f"no {OPERATOR_ACTIONS[0]} row is recorded here; there is no restart to read"}
+        for row in rows:
+            if row.state not in ("pending", "running", *TERMINAL):
+                # Same guard as the single-row read: a fifth word is a core bug and
+                # must not reach a page as a status nobody can render.
+                return 503, {"detail": f"the core reported an unknown action state {row.state!r}"}
+        return 200, {"actions": [self._row(row) for row in rows], "count": len(rows)}
+
+    @staticmethod
+    def _row(row: _ActionRowLike) -> dict[str, Any]:
+        """One stored row in the wire names ``action()`` already uses.
+
+        `detail` is the wire name for the row's `said` column and `action` for its
+        `verb`; those two spellings were ruled (contract §2) because the single-row
+        read is already on the wire. Two endpoints teaching two clients two names
+        is the failure, so this projects field for field the same shape — if anyone
+        ever moves it, they move both reads together.
+        """
+        return {"state": row.state, "detail": row.said, "id": row.id,
+                "handle": row.handle, "action": row.verb,
+                "actor": row.actor, "actor_source": row.actor_source,
+                "reason": row.reason}
