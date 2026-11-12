@@ -66,12 +66,6 @@ HANDLE_LABEL = "babo.handle"
 # synthetic agent handle (L-10). If `api.py` ever carries the constant, import it
 # rather than restating it.
 UI_POD = "babo-ui"
-# L-01's closed set plus L-10's recorded amendment. `ACTIONS` is the surface's
-# word list and `api.py` is the interface owner's file; the core accepts the
-# sixth verb from the day the amendment is ruled, and this is an *ordered union*
-# rather than a concatenation so that no future day can name the verb twice —
-# once the surface carries it, the tuple is the surface's own.
-CORE_ACTIONS: tuple[str, ...] = tuple(dict.fromkeys((*ACTIONS, "restart-ui")))
 # Automation is a first-class actor, recorded verbatim (soro, R5 note).
 SYSTEM_ACTORS = ("system:watchdog", "system:reconcile", "system:boot")
 
@@ -324,12 +318,13 @@ class NativeManager:
     # -- the one write boundary -----------------------------------------
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",
             actor_source: str = "", action_id: str | None = None) -> str:
-        if action not in CORE_ACTIONS:
-            # L-01: refused before a row exists or a thread starts. The list is
-            # CORE_ACTIONS so the sentence below can never name a verb as both
-            # known and unknown (Bomu's L-10 acceptance (f)).
+        if action not in ACTIONS:
+            # L-01: refused before a row exists or a thread starts. The list is the
+            # closed set itself, so the sentence below can never name a verb as
+            # both known and unknown (bomu's L-10 acceptance (f)) and there is no
+            # second name for the vocabulary to drift against.
             raise CoreRefusalError(
-                f"unknown action {action!r}; it is one of {', '.join(CORE_ACTIONS)}"
+                f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}"
             )
         if not handle or not handle.strip():
             raise CoreRefusalError("no handle recorded; nothing to act on")
@@ -364,7 +359,7 @@ class NativeManager:
         launch = self.store.launch(handle) or {}
         record_state = str(launch.get("state") or "")
         facts: ContainerFacts | None = None
-        if action in ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui"):
+        if action in ACTIONS:
             try:
                 facts = self.runtime.inspect_container(handle)
             except RuntimeUnavailableError as exc:

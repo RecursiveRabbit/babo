@@ -36,26 +36,31 @@ from typing import Protocol, cast, runtime_checkable
 
 from babo.office.model import AgentObserved
 
-# The closed action vocabulary. `restart-ui` is the cross-pod half of revocation:
-# it asks the Manager to replace the UI pod, which invalidates every in-memory
+# The closed action vocabulary is a partition of two doors, each written as a
+# literal — never one list plus an exclusion. An allow-list built by filtering a
+# name out is a deny-list of one, and a deny-list is exactly the row a seventh
+# verb slips past the day someone adds it. `tests/baton/test_office_vocabulary.py`
+# asserts the shape: the union of the doors is ACTIONS, the intersection is empty,
+# every verb is in exactly one door, and each door's membership is a decision
+# recorded here rather than a consequence of a filter.
+
+# The five lifecycle verbs an agent handle may carry (L-01).
+AGENT_ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy")
+
+# The host operator's door: `restart-ui` is the cross-pod half of revocation — it
+# asks the Manager to replace the UI pod, which invalidates every in-memory
 # session by construction (D-12: revocation is owned by the pod holding the store).
-ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
-
-# The verbs an agent handle can carry: everything but the pod verb. `restart-ui`
-# is deliberately absent — its handle is the UI pod and its caller is the host
-# operator, so it is never offered on an agent row and never accepted on the
-# agent path (L-10's standing, ruled 2026-11-11). The vocabulary above stays six
-# verbs; what narrows is the door, not the word.
-AGENT_ACTIONS = tuple(verb for verb in ACTIONS if verb != "restart-ui")
-
-# The one verb the host operator may invoke, and the class word that authorizes
-# it — an allow-list of exactly one (soro's §8 ruling, corrected 2026-11-11: the
-# check is on the *provenance*, `actor_source == "host-wg"`, not on a literal
-# actor token; the actor is the operator's own name beside it). Never a deny-list
-# of the five classes we happened to think of: a deny-list is a row a sixth class
-# slips past the day someone adds one.
+# Its handle is the UI pod and its caller is the host operator (L-10's standing,
+# ruled 2026-11-11), so it is never offered on an agent row and never accepted on
+# the agent path. The authorizing class word is the *provenance*,
+# `actor_source == "host-wg"`, not a literal actor token (soro's §8 ruling,
+# corrected 2026-11-11); the actor is the operator's own name beside it.
 OPERATOR_ACTIONS = ("restart-ui",)
 OPERATOR_SOURCE = "host-wg"
+
+# The one closed set the surface, the core and the tests agree on. Order matters:
+# it is the order refusals print and the order the page offers.
+ACTIONS = AGENT_ACTIONS + OPERATOR_ACTIONS
 
 # Terminal states, verbatim. Anything else is still in flight.
 TERMINAL = ("succeeded", "failed", "refused", "timeout")
