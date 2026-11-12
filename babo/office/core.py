@@ -433,7 +433,8 @@ class NativeManager:
             return
         begun = self.clock()
         if _parse(begun) > _parse(self._expires_at(row.created_at)):
-            self._finish(row, "timeout", "no verdict before the deadline; outcome unknown",
+            self._finish(row, "timeout",
+                         "nothing was attempted: the deadline passed before execution",
                          event=_event(row.verb, "timeout"))
             return
         if not self.store.start_action(action_id, begun):
@@ -442,11 +443,42 @@ class NativeManager:
         try:
             state, said, event = self._execute(row, identity)
         except ControlUnavailableError as exc:
-            state, said, event = "failed", str(exc), _event(row.verb, "failed")
+            # F10 (nime's ruling, grounded on the contract): this is not one of
+            # `timeout`'s two sites — nothing expired, and a verdict did arrive, from
+            # the port itself: it answered that it would not act. So the effect was
+            # never dispatched and `refused` is the word. The port's own sentence is
+            # kept verbatim, because "nothing was attempted" is the fact and the
+            # state word must not add a second one.
+            state, said, event = ("refused", f"{exc}; nothing was attempted",
+                                  _event(row.verb, "refused"))
         except RuntimeUnavailableError as exc:
-            state, said, event = "failed", f"runtime unavailable: {exc}", _event(row.verb, "failed")
-        except Exception as exc:  # a decision path must never guess; it records
-            state, said, event = "failed", f"{type(exc).__name__}: {exc}"[:400], _event(row.verb, "failed")
+            # F10: the runtime could not be read, which is a fact; "unavailable" would
+            # be an inference from the exception's class name. Four sentences in this
+            # file say "could not be read"; this one does too. What it must not do is
+            # assert the effect — the read failed, so the effect is unstated.
+            #
+            # This mapping is only as good as the exception is coarse. The same class
+            # also carries the two non-zero-`rc` sites in runtime.py, where a command
+            # *did* return a verdict (an unhappy one). Until those raise something
+            # distinct (F12), `timeout` is the best available word for the bucket, not
+            # a complete one — and a reader must not take it as proof that no verdict
+            # existed.
+            state, said, event = ("timeout",
+                                  "no verdict arrived, the runtime could not be read "
+                                  f"({exc}); effect unstated",
+                                  _event(row.verb, "timeout"))
+        except Exception as exc:
+            # It raised inside the executor: the action was dispatched and then
+            # interrupted before a verdict, so whether it took effect is unknown.
+            # `failed` is still the right word for a path that raised — it acted and
+            # broke — but the sentence must not pretend the outcome is known. The old
+            # comment here read "a decision path must never guess; it records" above a
+            # line that guessed; the guesses were the two handlers above.
+            detail = f"{type(exc).__name__}: {exc}"[:200]
+            state, said, event = ("failed",
+                                  f"{detail}; dispatched and interrupted before a verdict, "
+                                  "so whether it took effect is unknown",
+                                  _event(row.verb, "failed"))
         self._finish(row, state, said, event, identity.identity if identity else "")
 
     def _execute(self, row: ActionRow, identity: Identity | None) -> tuple[str, str, str]:

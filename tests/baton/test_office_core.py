@@ -24,7 +24,7 @@ from babo.office.core import (
     decide,
 )
 from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
-from babo.office.runtime import ContainerFacts, LaunchSpec
+from babo.office.runtime import ContainerFacts, LaunchSpec, RuntimeUnavailableError
 from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
@@ -46,14 +46,27 @@ def _manager(tmp_path: Path, runtime: RecordingRuntime, **kw) -> NativeManager:
         ),
     )
     kw.setdefault("executor", lambda fn: fn())
+    clock = kw.pop("clock", NOW)
     deadline = kw.pop("deadline", 5.0)
     return NativeManager(store=Store(tmp_path / "m.db"), runtime=runtime,
-                         ledger=_ledger(tmp_path), clock=NOW, deadline=deadline, **kw)
+                         ledger=_ledger(tmp_path), clock=clock, deadline=deadline, **kw)
 
 
 def _alive(handle: str = "agent-a") -> ContainerFacts:
     return ContainerFacts(name=handle, state="running", ip="10.89.0.42",
                           labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle})
+
+
+def _ticking_clock(stamps: list[str]):
+    """Each call returns the next stamp, then repeats the last — no sleeps."""
+    seen = {"i": 0}
+
+    def tick() -> str:
+        index = min(seen["i"], len(stamps) - 1)
+        seen["i"] += 1
+        return stamps[index]
+
+    return tick
 
 
 def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) -> None:
@@ -537,6 +550,109 @@ def test_the_decision_table_carries_the_same_assertion_as_the_second_wall() -> N
     assert verdict.detail == (
         "restart-ui acts on babo-ui, not 'agent-a'; the handle is the pod's name"
     )
+
+
+def test_a_runtime_that_vanishes_mid_spawn_is_timeout_not_failed(tmp_path: Path) -> None:
+    # F10: `failed` means the runtime returned an error, and it does not assert the
+    # effect; a runtime that cannot be read returned nothing at all, which is no
+    # verdict (api.py's closed set). This is the handler that writes the row — the
+    # thing someone reads a week later to learn what happened to the pod.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    real_inspect = runtime.inspect_container
+    seen = {"n": 0}
+
+    def inspect_then_vanish(name: str) -> ContainerFacts | None:
+        seen["n"] += 1
+        if seen["n"] > 1:  # act() reads once; the executor's re-read is where it goes
+            raise RuntimeUnavailableError("socket went away")
+        return real_inspect(name)
+
+    runtime.inspect_container = inspect_then_vanish  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "timeout"
+    assert record.said == (
+        "no verdict arrived, the runtime could not be read (socket went away); effect unstated"
+    )
+    # Opposite polarity from the expired-deadline row: this one *did* start, and that
+    # is the column that separates the two `timeout` sites in the record.
+    assert manager.store.get_action(record.id).started_at is not None
+    # No effectful call follows the failing read: no `run`, no `remove`.
+    assert [call for call in runtime.calls if call[0] in ("run", "remove")] == []
+
+
+def test_a_missing_control_port_refuses_and_says_nothing_was_attempted(
+    tmp_path: Path,
+) -> None:
+    # F10: the default port answers that it will not act, so the effect was never
+    # dispatched — `refused`, not `timeout` (no deadline is involved and a verdict did
+    # arrive), and not `failed` (nothing was tried and it did not break).
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime)  # no agent_control wired
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "refused"
+    assert record.said == (
+        "no stand-down handshake is configured for agent-a; refusing to kill the pod "
+        "(a freeze preserves work, L-06); nothing was attempted"
+    )
+    assert [call for call in runtime.calls if call[0] in ("run", "remove")] == []
+
+
+def test_an_executor_that_raises_is_failed_with_the_effect_left_open(tmp_path: Path) -> None:
+    # The one handler that keeps `failed`: the path raised after dispatch, so it acted
+    # and broke — and the sentence still refuses to claim what the effect was.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def boom(spec: LaunchSpec) -> ContainerFacts:
+        raise ValueError("boom")
+
+    runtime.run = boom  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert record.said == (
+        "ValueError: boom; dispatched and interrupted before a verdict, "
+        "so whether it took effect is unknown"
+    )
+
+
+def test_a_deadline_that_passes_before_the_worker_starts_attempts_nothing(
+    tmp_path: Path,
+) -> None:
+    # F11: the row was created and the worker looked at it after the deadline. Nothing
+    # was attempted; `started_at is None` is the machine-readable form of that, and it
+    # is what keeps the sentence and the record agreeing by construction.
+    runtime = RecordingRuntime()
+    clock = _ticking_clock(["2026-11-11T00:00:00+00:00", "2026-11-11T00:00:06+00:00",
+                            "2026-11-11T00:00:07+00:00"])
+    manager = _manager(tmp_path, runtime, clock=clock, deadline=5.0)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "timeout"
+    assert record.said == "nothing was attempted: the deadline passed before execution"
+    assert manager.store.get_action(record.id).started_at is None
+    # `act()` inspects before `decide()` for every verb, so one inspect is expected;
+    # nothing *effectful* may appear.
+    assert [call for call in runtime.calls if call[0] != "inspect"] == []
+
+
+def test_the_same_row_started_in_time_is_executed_normally(tmp_path: Path) -> None:
+    # The control: the branch is reachable in both directions, so the assertions above
+    # are about the deadline and not about spawn being broken.
+    runtime = RecordingRuntime()
+    clock = _ticking_clock(["2026-11-11T00:00:00+00:00", "2026-11-11T00:00:01+00:00",
+                            "2026-11-11T00:00:02+00:00"])
+    manager = _manager(tmp_path, runtime, clock=clock, deadline=5.0)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert manager.store.get_action(record.id).started_at is not None
+    assert [call for call in runtime.calls if call[0] == "inspect"] == [
+        ("inspect", "agent-a"), ("inspect", "agent-a")
+    ]
 
 
 def test_the_ui_pod_is_never_listed_as_an_agent(tmp_path: Path) -> None:

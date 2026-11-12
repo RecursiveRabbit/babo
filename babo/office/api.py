@@ -21,8 +21,30 @@ Rules the implementation owes this interface (not restated anywhere else):
   disagreement between the runtime and the record is reported as `unknown` with
   a `note`, never resolved by preference.
 - **Lifecycle is terminal-state honest.** `succeeded | failed | refused |
-  timeout` are distinct: `refused` means the core declined before acting,
-  `failed` means it acted and broke, `timeout` means no verdict arrived.
+  timeout` are distinct, and what separates them is whether the core acted and
+  whether the word asserts the effect:
+
+  - `refused` — the core declined before acting.
+  - `failed` — dispatched, and returned an error; the effect is **not** asserted.
+  - `timeout` — dispatched, and no verdict arrived; the effect is **not**
+    asserted. It covers both sites: a request interrupted before a verdict (the
+    row's `started_at` is set) and a deadline that passed before anything was
+    attempted (`started_at` is `NULL` — the machine-readable form of "nothing was
+    attempted").
+  - `succeeded` — dispatched, and **the effect is asserted**: the pod is up, the
+    work is frozen, the UI was replaced. The `202`'s honesty rests on this word
+    meaning that; no other word may borrow it.
+
+  When the effect is unknown, the row's own sentence says so; the choice of word
+  records what was observed, never the effect. And when the core knows nothing was
+  attempted, the row must say that rather than leave the reader to infer it.
+
+  This word is only as fine as the errors the runtime raises.
+  `RuntimeUnavailableError` also carries sites where a command returned a verdict
+  with a non-zero `rc`, so while that exception stays collapsed, `timeout` is the
+  best available word for the bucket and **not** a claim that no verdict existed.
+  The mapping is net better than `failed`, and it is not right about every row it
+  covers.
 - **Verbs are idempotent.** Waking an awake agent is a success that says so;
   it is not an error and not a fake restart.
 - **Credential rows carry identity only**: id, scope, issued/expires. The core
