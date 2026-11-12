@@ -143,6 +143,15 @@ def decide(verb: str, facts: ContainerFacts | None, identity: Identity | None,
         # authority is the service's gate (A-03); no identity is consulted here
         # because the UI pod has none. UI-initiated, Manager-executed, creates no
         # channel, and the Manager still initiates nothing on its own.
+        if handle != UI_POD:
+            # F3 (bomu): the verb's handle is the pod's name, and only that. This is
+            # the second wall — `decide` is pure, so any future road that reaches a
+            # verdict inherits it even if it never passes through `act()`. The claim
+            # is refused by name, never rewritten to `UI_POD`: coercion would erase
+            # the caller's bug and put a true sentence above a false call.
+            return Refusal(
+                f"restart-ui acts on {UI_POD}, not {handle!r}; the handle is the pod's name"
+            )
         if facts is None:
             return Refusal(f"nothing to restart: no {UI_POD} pod")
         if not facts.alive:
@@ -333,6 +342,14 @@ class NativeManager:
             )
         if not handle or not handle.strip():
             raise CoreRefusalError("no handle recorded; nothing to act on")
+        if action == "restart-ui" and handle != UI_POD:
+            # F3 (bomu): before any I/O — no store read, no runtime inspect, no row.
+            # `restart-ui`'s handle is the pod's name; until this check the boundary
+            # inspected whatever handle it was handed and could write a row above a
+            # sentence about `babo-ui`. Refused by name, never coerced to `UI_POD`.
+            raise CoreRefusalError(
+                f"restart-ui acts on {UI_POD}, not {handle!r}; the handle is the pod's name"
+            )
 
         # Replay of a known row: no new row, no dispatch, no effect (L-07).
         if action_id:

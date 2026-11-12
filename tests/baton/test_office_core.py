@@ -19,6 +19,7 @@ from babo.office.core import (
     CoreRefusalError,
     Identity,
     NativeManager,
+    Refusal,
     UnknownActionError,
     decide,
 )
@@ -511,6 +512,31 @@ def test_a_direct_execute_cannot_spawn_a_second_pod(tmp_path: Path) -> None:
     assert state == "succeeded"
     assert "existing pod" in said
     assert [call for call in runtime.calls if call[0] == "run"] == []
+
+
+def test_restart_ui_on_an_agent_handle_is_refused_by_name_before_any_io(tmp_path: Path) -> None:
+    # F3 (bomu): the handle is the pod's name. The boundary refuses the caller's
+    # claim rather than rewriting it — no runtime read, no store read, no row, and
+    # the sentence names `babo-ui` so the caller sees which handle was true.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    with pytest.raises(CoreRefusalError) as caught:
+        manager.act("agent-a", "restart-ui", "because", actor="evans", actor_source="terminal")
+    assert str(caught.value) == (
+        "restart-ui acts on babo-ui, not 'agent-a'; the handle is the pod's name"
+    )
+    assert manager.store.actions() == []
+    assert runtime.calls == []
+
+
+def test_the_decision_table_carries_the_same_assertion_as_the_second_wall() -> None:
+    # Pure, so any future road that reaches a verdict inherits it even without
+    # `act()`. One sentence, two gates — the same shape as the spawn no-op.
+    verdict = decide("restart-ui", _ui_pod(), None, "agent-a")
+    assert isinstance(verdict, Refusal)
+    assert verdict.detail == (
+        "restart-ui acts on babo-ui, not 'agent-a'; the handle is the pod's name"
+    )
 
 
 def test_the_ui_pod_is_never_listed_as_an_agent(tmp_path: Path) -> None:
