@@ -1,8 +1,11 @@
-"""The UI→Manager hop: five calls in one direction, and the rules that guard them.
+"""The UI→Manager hop: the calls in one direction, and the rules that guard them.
 
 Client side: a failure is a value, the Manager's words are the verdict, and no
-retry happens silently. Service side: only the UI pod gets in, actor and reason
-are required, a replay key is the caller's, and the terminal set stays closed.
+retry happens silently. Service side: only the UI pod gets in to the agent path,
+actor and reason are required, a replay key is the caller's, and the terminal set
+stays closed. One verb has a different door: `restart-ui` is the host operator's,
+admitted at the host-WG door, and 202 on it is best-effort — no client ever sees
+it reach `succeeded` (H-6).
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from babo.office.service import ManagerService
 from baton.office_fakes import FakeCore
 
 UI = "10.0.0.11"
+OP = "10.77.0.9"
 
 
 def _core(**kwargs: object) -> FakeCore:
@@ -58,9 +62,51 @@ def test_the_client_refuses_an_unknown_verb_without_a_round_trip() -> None:
     assert result.unavailable and "unknown action" in result.said and not calls
 
 
+def test_the_client_refuses_the_pod_verb_on_the_agent_path_and_from_a_session() -> None:
+    """The UI derives the operator; it does not invent one, and it does not carry
+    a pod verb on the agent path (ruled 2026-11-11).
+
+    Three facts, in the order the door checks them: the generic `act` never
+    carries `restart-ui`; a session-sourced actor is refused here rather than
+    becoming a 403; and a derived host-WG operator is sent to the operator
+    endpoint with that actor, because that is the only spelling the Manager admits.
+    """
+    calls: list[dict[str, object]] = []
+
+    def transport(method: str, url: str, body: dict | None, timeout_s: float) -> tuple[int, str]:
+        calls.append({"method": method, "url": url, "body": body})
+        return 202, json.dumps({"action_id": "act-1", "status": "accepted", "best_effort": True})
+
+    client = hop.HopClient("http://x", transport=transport)
+
+    via_act = client.act("babo-ui", "restart-ui", "r", actor=Actor("evans", "host-wg"))
+    assert via_act.unavailable and "agent path" in via_act.said
+
+    from_a_session = client.restart_ui("r", actor=Actor("owner", "webui-session"))
+    assert from_a_session.unavailable and "not the host operator" in from_a_session.said
+    assert not calls, "neither refusal left the pod"
+
+    derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("evans", "host-wg"))
+    assert derived.ok and derived.status == 202
+    assert calls == [{"method": "POST", "url": "http://x/api/v1/office/ui/restart",
+                      "body": {"reason": "invalidate sessions", "actor": "evans", "actor_source": "host-wg"}}]
+
+
+def test_an_operator_cannot_be_derived_from_anything_but_a_host_wg_session() -> None:
+    """One place derives the operator, so the surface cannot grow a second idea."""
+    import pytest
+
+    for source in ("webui-session", "channel", "terminal", ""):
+        with pytest.raises(ValueError):
+            hop.operator_from_session("evans", source)
+    assert hop.operator_from_session("evans", "host-wg") == Actor("evans", "host-wg")
+    with pytest.raises(ValueError):
+        hop.operator_from_session("  ", "host-wg")
+
+
 # -- service ----------------------------------------------------------------
 def test_only_the_ui_pod_gets_in() -> None:
-    svc = ManagerService(core=_core(), ui_peers=(UI,))
+    svc = ManagerService(core=_core(), ui_peers=(UI,), operator_peers=(OP,))
     assert svc.agents(UI)[0] == 200
     status, payload = svc.agents("10.0.0.99")
     assert status == 403 and "not the UI pod" in payload["detail"]
@@ -71,7 +117,7 @@ def test_only_the_ui_pod_gets_in() -> None:
 
 def test_an_anonymous_action_is_refused_before_any_effect() -> None:
     core = _core()
-    svc = ManagerService(core=core, ui_peers=(UI,))
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.act(UI, {"handle": "crew-1", "action": "wake", "reason": "r"})
     assert status == 400 and "must name who is asking" in payload["detail"]
     assert not core.audit, "no effect without an actor"
@@ -79,7 +125,7 @@ def test_an_anonymous_action_is_refused_before_any_effect() -> None:
 
 def test_actor_and_reason_travel_to_the_core_with_their_source() -> None:
     core = _core()
-    svc = ManagerService(core=core, ui_peers=(UI,))
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.act(UI, {"handle": "crew-1", "action": "wake", "reason": "owner asked",
                                    "actor": "owner", "actor_source": "webui-session"})
     assert status == 202 and payload["action_id"]
@@ -93,7 +139,7 @@ def test_a_replayed_key_answers_202_and_the_refusal_is_read_as_a_row() -> None:
     other refusal. A 409 would leave the refusal visible only as a status code
     while the row sat unread.
     """
-    svc = ManagerService(core=_core(), ui_peers=(UI,))
+    svc = ManagerService(core=_core(), ui_peers=(UI,), operator_peers=(OP,))
     body = {"handle": "crew-1", "action": "wake", "reason": "r", "actor": "owner",
             "actor_source": "webui-session", "action_id": "k1"}
     first = svc.act(UI, dict(body))
@@ -105,34 +151,78 @@ def test_a_replayed_key_answers_202_and_the_refusal_is_read_as_a_row() -> None:
 
 
 def test_an_unknown_field_is_refused_rather_than_ignored() -> None:
-    svc = ManagerService(core=_core(), ui_peers=(UI,))
+    svc = ManagerService(core=_core(), ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.act(UI, {"handle": "crew-1", "action": "wake", "reason": "r", "actor": "o",
                                    "actor_source": "terminal", "socket": "/run/podman.sock"})
     assert status == 400 and "unknown field" in payload["detail"]
 
 
 def test_an_unknown_action_id_is_404_not_an_invented_failure() -> None:
-    svc = ManagerService(core=_core(), ui_peers=(UI,))
+    svc = ManagerService(core=_core(), ui_peers=(UI,), operator_peers=(OP,))
     assert svc.action(UI, "nope")[0] == 404
 
 
 def test_a_degraded_core_is_503_with_its_own_words() -> None:
-    svc = ManagerService(core=_core(unavailable="podman socket unreadable"), ui_peers=(UI,))
+    svc = ManagerService(core=_core(unavailable="podman socket unreadable"), ui_peers=(UI,), operator_peers=(OP,))
     status, payload = svc.health()
     assert status == 503 and payload["available"] is False
     assert "unreadable" in payload["detail"]
 
 
-def test_restart_ui_is_an_action_not_a_side_door() -> None:
-    """H-3: same actor/reason rule, same closed states, same idempotency key."""
+def test_restart_ui_admits_two_doors_and_exactly_one_class() -> None:
+    """L-10's standing (ruled 2026-11-11): the door is not the principal.
+
+    Either admitted door may carry it — the operator's own host, or the UI pod
+    carrying the operator's derived identity — but the actor must be the host
+    operator. A stranger address is not "close enough", and a session, channel or
+    terminal cannot wear the authority even from an admitted address. Every
+    refusal happens before effect: no row, no core call.
+    """
     core = _core()
     core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
-    svc = ManagerService(core=core, ui_peers=(UI,))
-    assert svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "o", "actor_source": "terminal"})[0] == 403
-    assert svc.restart_ui(UI, {"reason": "r", "actor": "o"})[0] == 400
-    status, payload = svc.restart_ui(UI, {"reason": "invalidate sessions", "actor": "owner",
-                                          "actor_source": "webui-session", "action_id": "r1"})
-    assert status == 202
-    assert core.audit[-1][0] == service.UI_POD, "the audit row names the pod, not a synthetic handle"
-    assert core.audit[-1][1] == "restart-ui"
-    assert svc.action(UI, payload["action_id"])[1]["state"] == "succeeded"
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+
+    refused_stranger, payload = svc.restart_ui("10.0.0.99", {"reason": "r", "actor": "o",
+                                                          "actor_source": "host-wg"})
+    assert refused_stranger == 403 and "not an admitted door" in payload["detail"]
+
+    for source in ("webui-session", "channel", "terminal"):
+        status, payload = svc.restart_ui(UI, {"reason": "r", "actor": "lead-1", "actor_source": source})
+        assert status == 403 and "not the host operator" in payload["detail"]
+
+    assert svc.restart_ui(OP, {"reason": "r", "actor": "o"})[0] == 400
+    assert not core.audit, "no refusal above reached the core"
+
+
+def test_restart_ui_is_accepted_from_either_door_and_is_best_effort() -> None:
+    """H-6: 202 means accepted-and-best-effort, never "it worked".
+
+    The replacement kills the process that asked, so a client that died
+    mid-request cannot be shown a verdict. The response says so instead of
+    implying one, and the action row is the witness — from either door.
+    """
+    for door in (OP, UI):
+        core = _core()
+        core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
+        svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+
+        status, payload = svc.restart_ui(door, {"reason": "invalidate sessions", "actor": "evans",
+                                                "actor_source": "host-wg", "action_id": "r1"})
+        assert status == 202
+        assert payload["status"] == "accepted" and payload["best_effort"] is True
+        assert "succeeded" in payload["note"] and "will not see" in payload["note"], (
+            "the contract names what the caller will never observe")
+        assert payload["status"] not in ("succeeded", "failed", "timeout")
+        assert core.audit[-1][0] == service.UI_POD, "the audit row names the pod, not a synthetic handle"
+        assert core.audit[-1][1] == "restart-ui"
+        assert core.audit[-1][2:] == ("evans", "host-wg"), "the row carries the operator, not the door"
+
+
+def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
+    """The other half of the same ruling: `act` names the refusal, and the core is never asked."""
+    core = _core()
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    status, payload = svc.act(UI, {"handle": "crew-1", "action": "restart-ui", "reason": "r",
+                                   "actor": "lead-1", "actor_source": "webui-session"})
+    assert status == 403 and "host operator's verb" in payload["detail"]
+    assert not core.audit, "a closed door leaves no row"

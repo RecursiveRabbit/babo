@@ -41,6 +41,25 @@ from babo.office.model import AgentObserved
 # session by construction (D-12: revocation is owned by the pod holding the store).
 ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
 
+# The verbs an agent handle can carry: everything but the pod verb. `restart-ui`
+# is deliberately absent — its handle is the UI pod and its caller is the host
+# operator, so it is never offered on an agent row and never accepted on the
+# agent path (L-10's standing, ruled 2026-11-11). The vocabulary above stays six
+# verbs; what narrows is the door, not the word.
+AGENT_ACTIONS = tuple(verb for verb in ACTIONS if verb != "restart-ui")
+
+# The one verb the host operator may invoke, and the only kind of caller that may
+# invoke it: an authenticated host, admitted at the host-WG door. Not a Lead, not
+# a crew agent, not a service identity (the UI pod included), not an
+# unauthenticated local process.
+OPERATOR_ACTIONS = ("restart-ui",)
+
+# The actor source the operator door admits. WireGuard admits a *host*, not a
+# person: the key proves which machine spoke, so the source word names the door
+# rather than pretending to name a human. Every other word (`webui-session`,
+# `channel`, `terminal`, an agent's own) is refused by name at that door.
+OPERATOR_SOURCE = "host-wg"
+
 # Terminal states, verbatim. Anything else is still in flight.
 TERMINAL = ("succeeded", "failed", "refused", "timeout")
 

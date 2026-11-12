@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
 from babo.office.actors import Actor
-from babo.office.api import ACTIONS
+from babo.office.api import AGENT_ACTIONS, OPERATOR_ACTIONS, OPERATOR_SOURCE
 
 
 @dataclass(frozen=True)
@@ -93,10 +93,16 @@ class HopClient:
 
     def act(self, handle: str, action: str, reason: str, *, actor: Actor,
             action_id: str | None = None) -> HopResult:
-        if action not in ACTIONS:
+        if action in OPERATOR_ACTIONS:
+            # The generic path is the agent path: it carries agent verbs and agent
+            # handles. The pod verb has its own method, because its actor is not
+            # the page's to choose (ruled 2026-11-11).
+            return HopResult(ok=False, said=(f"{action} is not carried on the agent path: use the operator "
+                                             f"door (host-WG session, {OPERATOR_SOURCE!r})"))
+        if action not in AGENT_ACTIONS:
             # Refuse locally too: a typo should not become a network round trip
             # whose 400 the page then has to translate.
-            return HopResult(ok=False, said=f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}")
+            return HopResult(ok=False, said=f"unknown action {action!r}; it is one of {', '.join(AGENT_ACTIONS)}")
         body: dict[str, Any] = {"handle": handle, "action": action, "reason": reason,
                                 "actor": actor.name, "actor_source": actor.source}
         if action_id:
@@ -105,3 +111,40 @@ class HopClient:
 
     def action(self, action_id: str) -> HopResult:
         return self._call("GET", f"/api/v1/office/actions/{action_id}")
+
+    def restart_ui(self, reason: str, *, actor: Actor, action_id: str | None = None) -> HopResult:
+        """The one verb whose actor is not the page's to choose (ruled 2026-11-11).
+
+        The UI derives the operator from the **authenticated host-WG session** and
+        sends that actor; it never accepts one from the request body, and an actor
+        of any other class (a session, a channel, a terminal, a Lead, an agent) is
+        refused here — before the wire, so the Manager's own class refusal is the
+        second wall and not the first. No new role exists: the operator is a host
+        operator, named by the identity its WG session already proved.
+
+        What comes back is 202 and best-effort: the replacement kills the process
+        that made this call, so this client will not be alive to see a verdict
+        (H-6). A `succeeded` here would be a lie told by a dead process.
+        """
+        if actor.source != OPERATOR_SOURCE:
+            return HopResult(ok=False, said=(f"{actor.source!r} is not the host operator; "
+                                             f"{OPERATOR_ACTIONS[0]} is invoked by the operator derived "
+                                             f"from the authenticated host-WG session ({OPERATOR_SOURCE!r})"))
+        body: dict[str, Any] = {"reason": reason, "actor": actor.name, "actor_source": actor.source}
+        if action_id:
+            body["action_id"] = action_id
+        return self._call("POST", "/api/v1/office/ui/restart", body)
+
+
+def operator_from_session(name: str, source: str) -> Actor:
+    """Derive the host operator from the authenticated session, or refuse.
+
+    One place, so the surface cannot grow a second idea of who the operator is.
+    ``source`` is the session's own authenticated word; anything but the host-WG
+    door raises rather than quietly producing an actor the Manager will refuse.
+    """
+    if source != OPERATOR_SOURCE:
+        raise ValueError(f"a {source!r} session is not a host-WG session; it cannot act as the operator")
+    if not name.strip():
+        raise ValueError("the operator has no name; an anonymous restart is not admitted")
+    return Actor(name=name, source=OPERATOR_SOURCE)

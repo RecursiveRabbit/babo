@@ -158,5 +158,5 @@ def test_the_vocabulary_is_declared_once() -> None:
 
     source = inspect.getsource(control)
     assert "TERMINAL = (" not in source and "ACTIONS = (" not in source
-    assert control.ACTIONS is api.ACTIONS
+    assert control.AGENT_ACTIONS is api.AGENT_ACTIONS
     assert control.TERMINAL is api.TERMINAL

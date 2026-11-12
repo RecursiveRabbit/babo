@@ -24,6 +24,24 @@ def _configure(town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch, ma
     monkeypatch.setattr(cli, "console", Console(width=200, force_terminal=False))
 
 
+def test_restart_ui_is_not_a_terminal_verb(town: Town) -> None:
+    """A local process is not the host-WG door (L-10's standing, ruled 2026-11-11).
+
+    The verb is real and the refusal is by name — before the core is asked, so no
+    row is left behind to look like a lifecycle event.
+    """
+    from babo.baton.town import BatonError
+    from babo.office import control
+    from babo.office.actors import Actor
+
+    manager = FakeCore()
+    with pytest.raises(BatonError) as caught:
+        control.perform_sync(manager, "babo-ui", "restart-ui", "r",
+                             store=control.AgentStore(town), actor=Actor("evans", "terminal"))
+    assert "host-WG" in str(caught.value)
+    assert not manager.audit, "the refusal happens before the core is asked"
+
+
 def test_the_board_shows_lead_crew_and_the_managers_state(town: Town, index_path: Path,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     from typer.testing import CliRunner

@@ -19,7 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from babo.office.api import ACTIONS, TERMINAL, OfficeManager
+from babo.office.api import (
+    AGENT_ACTIONS,
+    OPERATOR_ACTIONS,
+    OPERATOR_SOURCE,
+    TERMINAL,
+    OfficeManager,
+)
 
 
 def _named(exc: BaseException, *names: str) -> bool:
@@ -53,6 +59,10 @@ def peer_allowed(peer: str, allowed: tuple[str, ...]) -> bool:
 class ManagerService:
     core: OfficeManager
     ui_peers: tuple[str, ...]
+    # The host-WG door's admitted addresses — the only callers `restart-ui`
+    # answers. Both sets are required arguments and neither has a default: the
+    # render owns the addresses, and an unset door is a closed door.
+    operator_peers: tuple[str, ...]
 
     # -- reads -----------------------------------------------------------
     def health(self) -> tuple[int, dict[str, Any]]:
@@ -81,8 +91,13 @@ class ManagerService:
         replay = body.get("action_id")
         if not handle:
             return 400, {"detail": "missing handle"}
-        if action not in ACTIONS:
-            return 400, {"detail": f"unknown action {action!r}; it is one of {', '.join(ACTIONS)}"}
+        if action in OPERATOR_ACTIONS:
+            # The agent path does not carry the pod verb. This is a refusal by
+            # name, not an unknown word: the verb exists, the door does not.
+            return 403, {"detail": (f"{action} is the host operator's verb, admitted at the host-WG "
+                                    "door; it is not carried on the agent path")}
+        if action not in AGENT_ACTIONS:
+            return 400, {"detail": f"unknown action {action!r}; it is one of {', '.join(AGENT_ACTIONS)}"}
         if not reason:
             return 400, {"detail": "missing reason"}
         if not actor or not actor_source:
@@ -104,12 +119,25 @@ class ManagerService:
         """The cross-pod half of revocation: replace the UI pod.
 
         It is an action, not a side door: same actor/reason requirement, same
-        idempotency key, same closed terminal states, and the ledger records that
-        it invalidates sessions by construction rather than by an API call reaching
+        idempotency key, same closed terminal states. The ledger records that it
+        invalidates sessions by construction rather than by an API call reaching
         into another pod's memory.
+
+        Two admissions, one principal (ruled 2026-11-11). The door can be the host
+        operator's own (admitted at the host-WG door) or the UI pod carrying that
+        operator's identity — but the **actor must be the host operator either way**:
+        derived by the UI from the authenticated host-WG session, never accepted
+        from a request body, and never a Lead, a crew agent, a service identity or
+        an unauthenticated local process. A non-operator class is refused here,
+        before any effect: no row, no core call.
+
+        The answer is 202 and it is **best-effort** (Bomu, H-6): replacing the pod
+        kills the process that asked, so a client that died mid-request cannot be
+        shown a verdict, and no client ever sees this action reach `succeeded` from
+        inside that process. The action row is the witness, not the response.
         """
-        if not peer_allowed(peer, self.ui_peers):
-            return 403, {"detail": f"{peer} is not the UI pod"}
+        if not (peer_allowed(peer, self.ui_peers) or peer_allowed(peer, self.operator_peers)):
+            return 403, {"detail": f"{peer} is not an admitted door for {OPERATOR_ACTIONS[0]}"}
         unknown = set(body) - {"reason", "actor", "actor_source", "action_id"}
         if unknown:
             return 400, {"detail": f"unknown field(s): {', '.join(sorted(unknown))}"}
@@ -119,6 +147,13 @@ class ManagerService:
         replay = body.get("action_id")
         if not reason or not actor or not actor_source:
             return 400, {"detail": "missing reason, actor or actor_source"}
+        if actor_source != OPERATOR_SOURCE:
+            # The door names the machine; the actor names the host operator derived
+            # from the session that door authenticated. A session, a channel, a
+            # terminal or an agent's own word is refused here by class, before any
+            # effect, so no service identity can wear the operator's authority.
+            return 403, {"detail": (f"actor_source {actor_source!r} is not the host operator; this verb "
+                                    f"admits {OPERATOR_SOURCE!r} only")}
         try:
             action_id = self.core.act(UI_POD, "restart-ui", reason, actor=actor, actor_source=actor_source,
                                       action_id=str(replay) if isinstance(replay, str) and replay else None)
@@ -126,7 +161,14 @@ class ManagerService:
             if not _named(exc, "CoreRefusalError", "RefusalError"):
                 raise
             return 409, {"detail": str(exc)}
-        return 202, {"action_id": action_id}
+        return 202, {
+            "action_id": action_id,
+            "status": "accepted",
+            "best_effort": True,
+            "note": ("accepted, best-effort: this action replaces the pod, so the caller that would "
+                     "have polled will not see a terminal state — no client sees `succeeded`. "
+                     "Read the action row for the verdict."),
+        }
 
     def action(self, peer: str, action_id: str) -> tuple[int, dict[str, Any]]:
         if not peer_allowed(peer, self.ui_peers):
