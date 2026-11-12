@@ -318,7 +318,8 @@ class NativeManager:
         if row is None:
             raise UnknownActionError(f"no such action: {action_id}")
         return ActionRecord(id=row.id, handle=row.handle, action=row.verb, state=row.state,
-                           said=row.said)
+                           said=row.said, actor=row.actor, actor_source=row.actor_source,
+                           reason=row.reason)
 
     # -- the one write boundary -----------------------------------------
     def act(self, handle: str, action: str, reason: str, *, actor: str = "",
