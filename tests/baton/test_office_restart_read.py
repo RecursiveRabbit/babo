@@ -55,9 +55,8 @@ def _core(tmp_path: Path, runtime: RecordingRuntime, **kw: Any) -> NativeManager
                          clock=NOW, deadline=5.0, **kw)
 
 
-def _svc(core: object, ui_peers: tuple[str, ...] = (UI_ADDR,),
-         operator_peers: tuple[str, ...] = (OP_ADDR,)) -> service.ManagerService:
-    return service.ManagerService(core=core, ui_peers=ui_peers, operator_peers=operator_peers)  # type: ignore[arg-type]
+def _svc(core: object, ui_peers: tuple[str, ...] = (UI_ADDR,)) -> service.ManagerService:
+    return service.ManagerService(core=core, ui_peers=ui_peers)  # type: ignore[arg-type]
 
 
 def _one_restart(tmp_path: Path, reason: str = "sessions leaked") -> tuple[NativeManager, str]:
@@ -172,12 +171,14 @@ def test_a_non_ui_peer_is_refused_with_a_403_and_gets_no_list(tmp_path: Path) ->
     assert "10.0.0.99 is not the UI pod" in payload["detail"]
 
 
-def test_the_operator_host_does_not_read_the_pods_history(tmp_path: Path) -> None:
-    # The write admits two doors; the read admits one. The operator's host has no
-    # business reading the pod's own restart history, so it is not admitted here.
+def test_a_host_address_does_not_read_the_pods_history(tmp_path: Path) -> None:
+    # The boundary ruling (Evans, 2026-11-12): the UI is the only thing that talks
+    # to the Manager. The host's WG address is now simply an address that is not
+    # the UI's — it reads nothing here, and it never had a door of its own.
     manager, _ = _one_restart(tmp_path)
     status, payload = _svc(manager).restart_latest(OP_ADDR)
     assert status == 403 and "actions" not in payload
+    assert f"{OP_ADDR} is not the UI pod" in payload["detail"]
 
 
 def test_no_restart_row_is_404_and_says_so(tmp_path: Path) -> None:

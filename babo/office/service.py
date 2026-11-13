@@ -16,6 +16,7 @@ without a socket.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
@@ -97,22 +98,32 @@ def peer_allowed(peer: str, allowed: tuple[str, ...]) -> bool:
     return any(entry == peer for entry in allowed)
 
 
-# The render's two door variables, in the render's own names. This module keeps no
-# address of its own: the pod's entrypoint resolves these, and a door whose address
-# is chosen here would answer to a source nobody rendered.
-RENDER_UI_SOURCES = "BABO_TRUSTED_SOURCES"          # the UI pod: the WebUI listener's only source
-RENDER_OPERATOR_SOURCES = "BABO_OPERATOR_SOURCES"   # the host's WG address: the operator door only
+# The render's one door, in the render's own name. This module keeps no address of
+# its own: the pod's entrypoint resolves it, and a door whose address is chosen
+# here would answer to a source nobody rendered.
+RENDER_UI_SOURCES = "BABO_TRUSTED_SOURCES"
+
+# Keys a render may still carry that this surface must not honour. The operator
+# door is retired, not deferred (Evans, 2026-11-12: the Manager has no state, it is
+# an actuator for the UI, and the UI is the only thing that talks to it about
+# anything). An address admitted as "the operator" would be a second principal, so
+# the key is warned about and ignored — never honoured, and never dropped in
+# silence either, because an ignored key is a future door.
+RETIRED_RENDER_KEYS = ("BABO_OPERATOR_SOURCES",)
 
 
 class RenderIncompleteError(ValueError):
     """The render did not declare a door, and this door has no honest default.
 
     Raised at construction, not at the first refusal. A Manager that starts with
-    the operator door silently closed answers every host call with `403 not an
-    admitted door` — the same sentence a wrong principal gets. Two facts that read
-    identically in the only place a caller can see them are one fact, and that is
-    the one thing this door cannot afford.
+    no admitted caller answers every request with `403`, the same sentence a
+    stranger gets. Two facts that read identically in the only place a caller can
+    see them are one fact, and that is the one thing this door cannot afford.
     """
+
+
+class RenderKeyRetiredWarning(UserWarning):
+    """The render still declares a key this surface has retired (and will ignore)."""
 
 
 def _exact_source(entry: str, *, key: str) -> str:
@@ -123,8 +134,8 @@ def _exact_source(entry: str, *, key: str) -> str:
     deliberately narrow. A shorter prefix would not fail *open* here — the compare
     is exact — it would fail *silently*: admitting nobody while the configuration
     says a source was named. So a prefix, a hostname, a second spelling of one
-    address (``010.0.0.2``) and an address no caller can arrive from are refused
-    by name, rather than becoming a peer that matches nothing.
+    address (``010.0.0.2``) and an address no caller arrives from are refused by
+    name, rather than becoming a peer that matches nothing.
     """
     address = entry[:-3] if entry.endswith("/32") else entry
     if "/" in address:
@@ -149,46 +160,62 @@ def _sources(declared: str | None, *, key: str) -> tuple[str, ...]:
     return tuple(_exact_source(entry, key=key) for entry in entries)
 
 
-def doors_from_render(render: Mapping[str, str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The two peer lists, read from the render and from nowhere else.
+def retired_keys(render: Mapping[str, str]) -> tuple[str, ...]:
+    """Which retired keys this render still carries, in declaration order."""
+    return tuple(key for key in RETIRED_RENDER_KEYS if key in render)
 
-    Both are required. `An unset door is a closed door` is the right rule for a
-    trust list whose absence the pod reports at start; it is the wrong rule here,
-    because this door's absence has no report — every host call would be a 403, and
-    a 403 is also what a stranger gets.
+
+def doors_from_render(render: Mapping[str, str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The door's peers, and the retired keys that were ignored.
+
+    One door is required and there is no second one: `An unset door is a closed
+    door` belongs to a trust list whose absence the pod reports at start; here the
+    absence has no report, so it refuses instead. The retired keys are returned
+    rather than discarded so the caller can say out loud what it ignored.
     """
     return (_sources(render.get(RENDER_UI_SOURCES), key=RENDER_UI_SOURCES),
-            _sources(render.get(RENDER_OPERATOR_SOURCES), key=RENDER_OPERATOR_SOURCES))
+            retired_keys(render))
 
 
 @dataclass
 class ManagerService:
+    """The Manager's surface: one caller, one peer list, no state of its own.
+
+    `ui_peers` is the whole of the admission policy. There is deliberately no
+    second list: the boundary ruling removed who may ask (Evans, 2026-11-12), and
+    a field for an operator address would be the place the next session puts one
+    back. The render owns the addresses and this module keeps none; `from_render`
+    refuses a door the render never declared rather than handing back a closed one.
+    """
+
     core: OfficeManager
     ui_peers: tuple[str, ...]
-    # The host-WG door's admitted addresses — the only callers `restart-ui`
-    # answers. Both sets are required arguments and neither has a default: the
-    # render owns the addresses, and a door built here with `()` is closed on
-    # purpose. `from_render` is the other direction — it refuses a door the render
-    # never declared rather than quietly handing back one of these.
-    operator_peers: tuple[str, ...]
 
     @classmethod
     def from_render(cls, core: OfficeManager, *, render: Mapping[str, str]) -> ManagerService:
-        """Build the service from the render's declared doors — the only constructor.
+        """Build the service from the render's declared door — the only constructor
+        from a render.
 
-        Not a convenience over the dataclass: these two fields *are* the admission
-        lists, and until this existed no process built them, so `restart-ui`'s
-        host-WG admission was a code capability with no rendered entry. The UI
-        listener's trust and the operator door's admission are two facts with two
-        names; the render is where both are declared, and this is where they
-        arrive as peers.
+        Not a convenience over the dataclass (which stays public, and is how a test
+        builds a door rather than a render): `ui_peers` *is* the admission policy,
+        and until this existed no process built it, so a rendered address had no
+        way in. The dataclass default stands in for nothing here.
+
+        A retired key that the render still carries is warned about and then
+        ignored. Ignoring it silently would leave a reader unable to tell a retired
+        key from a broken one; honouring it would restore the principal the ruling
+        removed.
 
         The caller is the Manager process. That process does not exist yet, and the
         listener that would front it is unassigned and unruled: this chooses no
         address, binds nothing and claims no row.
         """
-        ui_peers, operator_peers = doors_from_render(render)
-        return cls(core=core, ui_peers=ui_peers, operator_peers=operator_peers)
+        ui_peers, ignored = doors_from_render(render)
+        for key in ignored:
+            warnings.warn(f"{key} is retired and is ignored: the UI is the Manager's only "
+                          f"caller, so nothing may be admitted as an operator",
+                          RenderKeyRetiredWarning, stacklevel=2)
+        return cls(core=core, ui_peers=ui_peers)
 
     # -- reads -----------------------------------------------------------
     def health(self) -> tuple[int, dict[str, Any]]:
@@ -220,8 +247,8 @@ class ManagerService:
         if action in OPERATOR_ACTIONS:
             # The agent path does not carry the pod verb. This is a refusal by
             # name, not an unknown word: the verb exists, the door does not.
-            return 403, {"detail": (f"{action} is the host operator's verb, admitted at the host-WG "
-                                    "door; it is not carried on the agent path")}
+            return 403, {"detail": (f"{action} is the host operator's verb, carried by the UI on the "
+                                    "operator route; it is not carried on the agent path")}
         if action not in AGENT_ACTIONS:
             return 400, {"detail": f"unknown action {action!r}; it is one of {', '.join(AGENT_ACTIONS)}"}
         if not reason:
@@ -249,9 +276,10 @@ class ManagerService:
         invalidates sessions by construction rather than by an API call reaching
         into another pod's memory.
 
-        Two admissions, one principal (ruled 2026-11-11). The API-source check
-        guards who may reach the port; the authority check guards whose act it is,
-        and it is an allow-list of exactly one: the caller's provenance must be
+        One admission, one principal (the boundary ruling, Evans 2026-11-12): the
+        UI is the only thing that talks to the Manager about anything, so it is the
+        only peer that reaches this verb. The authority check guards whose act it
+        is, and it is an allow-list of exactly one: the caller's provenance must be
         `OPERATOR_SOURCE`, and the agent is not the caller's to name — this handler
         fixes it at `UI_POD`. Everything else — a Lead, a crew agent, a service
         identity, a session, an unauthenticated local process, or a name offered
@@ -259,17 +287,19 @@ class ManagerService:
         it caught named.
 
         The limit is the ruling's own: this Manager cannot re-derive the operator,
-        so it checks the class token the caller carried. This verb's authority
-        rests on the door that authenticated the operator, and the refusal catches a
-        wrong class, not a forged one.
+        so it checks the class token the UI carried. This verb's authority rests on
+        the session that authenticated the operator at the UI, and the refusal
+        catches a wrong class, not a forged one.
 
         The answer is 202 and it is **best-effort** (Bomu, H-6): replacing the pod
         kills the process that asked, so a client that died mid-request cannot be
         shown a verdict, and no client ever sees this action reach `succeeded` from
         inside that process. The action row is the witness, not the response.
         """
-        if not (peer_allowed(peer, self.ui_peers) or peer_allowed(peer, self.operator_peers)):
-            return 403, {"detail": f"{peer} is not an admitted door for {OPERATOR_ACTIONS[0]}"}
+        if not peer_allowed(peer, self.ui_peers):
+            # One door, because there is one caller (Evans, 2026-11-12). A host
+            # address that used to be the operator's is now simply not the UI's.
+            return 403, {"detail": f"{peer} is not the UI pod"}
         unknown = set(body) - {"reason", "actor", "actor_source", "action_id"}
         if unknown:
             return 400, {"detail": f"unknown field(s): {', '.join(sorted(unknown))}"}
