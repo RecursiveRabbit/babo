@@ -32,6 +32,79 @@ class RuntimeUnavailableError(RuntimeError):
     """The runtime could not be read. Never to be treated as an absent thing."""
 
 
+class RuntimeVerdictError(RuntimeUnavailableError):
+    """The runtime answered, and the answer was a failure (a non-zero rc).
+
+    A subclass so every existing handler still refuses safely, and distinct so the
+    executor can tell the two apart: a verdict arrived here, so the row is `failed`
+    (it returned an error), never `timeout` (no verdict). One word may not stand in
+    for the other, and this class exists so neither has to.
+
+    It is selected by **recognition**, not by the rc: a non-zero rc only says the
+    process exited unhappily. `_failed` raises this class only when stderr fails to
+    match the unreachable markers, and everything unrecognised takes the silent
+    class.
+    """
+
+
+# The three marker lists are the *single* authority for classifying a non-zero rc,
+# and `_classify` is the only reader. `_call` and `_call_maybe_absent` differ only
+# in whether they act on absent (return None) or treat it as a failure.
+#
+# A non-zero rc says the *process* exited unhappily; it does not say the tool
+# answered. Absent and answered are answers, so they are recognised positively.
+# Unreachable means podman never met the service. Everything else is silence: an
+# unrecognised message must not become `failed`, because claiming a verdict is the
+# stronger claim and "no usable verdict, effect unstated" is never wrong about a
+# pod. The consequence is deliberate — this classifier can only shrink toward
+# messages we can name, and a podman rewording makes a row quieter, never wrong.
+# (bomu, F12. Bare "no such file or directory" is not a marker: a container's own
+# exec error can contain it while the tool answered perfectly well.)
+ABSENT = ("no such object", "does not exist", "no such container", "no such network")
+UNREACHABLE = (
+    "cannot connect",
+    "connection refused",
+    "connection reset by peer",
+    "broken pipe",
+)
+ANSWERED = (
+    "image not found",
+    "no such image",
+    "unable to find image",
+    "invalid argument",
+    "unknown flag",
+    "executable file not found",
+)
+
+
+def _classify(stderr: str) -> str:
+    """absent | unreachable | verdict | silence — the one marker authority."""
+    text = (stderr or "").lower()
+    if any(marker in text for marker in ABSENT):
+        return "absent"
+    if any(marker in text for marker in UNREACHABLE):
+        return "unreachable"
+    if any(marker in text for marker in ANSWERED):
+        return "verdict"
+    return "silence"
+
+
+def _failed(what: str, code: int, stderr: str) -> RuntimeUnavailableError:
+    """The row's exception for a non-zero rc, chosen by `_classify`.
+
+    The silent kinds take the base class; a recognised message takes the subclass.
+    The list recognises **messages**, not objects — `invalid argument` and `unknown
+    flag` are verdicts about the command, and they are verdicts all the same. A
+    reader who read "about the object" here would delete those two from `ANSWERED`,
+    and a bad flag of ours would then report as silence: a code bug filing itself as
+    an unreadable runtime. (F14, bomu.)
+    """
+    text = f"podman {what} failed (rc={code}): {stderr.strip()[:400]}"
+    if _classify(stderr) in ("absent", "verdict"):
+        return RuntimeVerdictError(text)
+    return RuntimeUnavailableError(text)
+
+
 class ControlUnavailableError(RuntimeError):
     """No agent-control port is wired, so a stand-down cannot be requested (L-06)."""
 
@@ -133,8 +206,6 @@ class PodmanRuntime:
     Office surface can set.
     """
 
-    ABSENT = ("no such object", "does not exist", "no such container", "no such network")
-
     def __init__(self, url: str | None = None, *, timeout: float = 30.0) -> None:
         self.url = url or os.environ.get("BABO_PODMAN_URL", "unix:///run/podman/podman.sock")
         self.timeout = timeout
@@ -148,7 +219,7 @@ class PodmanRuntime:
         except subprocess.TimeoutExpired as exc:
             raise RuntimeUnavailableError(f"podman {what} timed out") from exc
         if done.returncode != 0:
-            raise RuntimeUnavailableError(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
+            raise _failed(what, done.returncode, done.stderr)
         return done.stdout
 
     def _call_maybe_absent(self, *args: str, what: str) -> str | None:
@@ -161,10 +232,9 @@ class PodmanRuntime:
             raise RuntimeUnavailableError(f"podman {what} timed out") from exc
         if done.returncode == 0:
             return done.stdout
-        text = (done.stderr or "").lower()
-        if any(marker in text for marker in self.ABSENT):
+        if _classify(done.stderr) == "absent":
             return None
-        raise RuntimeUnavailableError(f"podman {what} failed (rc={done.returncode}): {done.stderr.strip()[:400]}")
+        raise _failed(what, done.returncode, done.stderr)
 
     # -- reads ----------------------------------------------------------
     def inspect_container(self, name: str) -> ContainerFacts | None:

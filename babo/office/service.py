@@ -16,13 +16,15 @@ without a socket.
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
 
 from babo.office.api import (
     AGENT_ACTIONS,
     OPERATOR_ACTIONS,
-    OPERATOR_ACTOR,
+    OPERATOR_SOURCE,
     TERMINAL,
     OfficeManager,
 )
@@ -49,20 +51,171 @@ UI_POD = "babo-ui"
 # ignored, because an ignored key is a client believing it changed something.
 ACTION_FIELDS = frozenset({"handle", "action", "reason", "actor", "actor_source", "action_id"})
 
+# The restart read is bounded on purpose. The route names one thing — the latest
+# restart — and `limit` exists only because the store query underneath is
+# parameterised. A bound the caller cannot raise keeps this from quietly becoming
+# the collection endpoint the narrowing refused (F2, ruled 2026-11-12).
+RESTART_READ_MAX = 20
+
+
+class _ActionRowLike(Protocol):
+    """The fields this surface reads off one stored action row.
+
+    Declared here rather than imported from the store, and deliberately **without
+    `boot_id`**: the Manager's boot is not the UI pod's boot, so a field that invites
+    that correlation must not be part of the shape this surface is able to project
+    (contract §3). A missing field is honest; a field that appears to work is not.
+    """
+
+    id: str
+    handle: str
+    verb: str
+    state: str
+    said: str
+    actor: str
+    actor_source: str
+    reason: str
+    created_at: str
+
+
+@runtime_checkable
+class _ActionStore(Protocol):
+    """The one store read this surface makes: a parameterised, bounded query.
+
+    Not on ``OfficeManager`` because it is a store query and not a manager verb: the
+    interface stays the surface's contract, and this module keeps the read it needs
+    without widening the door for anyone else. A core with no such store is reported
+    as unreadable (503), never as an empty answer.
+    """
+
+    def actions(self, *, handle: str | None = ..., verbs: Iterable[str] | None = ...,
+                limit: int = ...) -> Sequence[_ActionRowLike]:
+        ...
+
 
 def peer_allowed(peer: str, allowed: tuple[str, ...]) -> bool:
     """Exact address match, no prefixes and no header trust — the trusted_sources rule."""
     return any(entry == peer for entry in allowed)
 
 
+# The render's one door, in the render's own name. This module keeps no address of
+# its own: the pod's entrypoint resolves it, and a door whose address is chosen
+# here would answer to a source nobody rendered.
+RENDER_UI_SOURCES = "BABO_TRUSTED_SOURCES"
+
+# Keys a render may still carry that this surface must not honour. The operator
+# door is retired, not deferred (Evans, 2026-11-12: the Manager has no state, it is
+# an actuator for the UI, and the UI is the only thing that talks to it about
+# anything). An address admitted as "the operator" would be a second principal, so
+# the key is warned about and ignored — never honoured, and never dropped in
+# silence either, because an ignored key is a future door.
+RETIRED_RENDER_KEYS = ("BABO_OPERATOR_SOURCES",)
+
+
+class RenderIncompleteError(ValueError):
+    """The render did not declare a door, and this door has no honest default.
+
+    Raised at construction, not at the first refusal. A Manager that starts with
+    no admitted caller answers every request with `403`, the same sentence a
+    stranger gets. Two facts that read identically in the only place a caller can
+    see them are one fact, and that is the one thing this door cannot afford.
+    """
+
+
+class RenderKeyRetiredWarning(UserWarning):
+    """The render still declares a key this surface has retired (and will ignore)."""
+
+
+def _exact_source(entry: str, *, key: str) -> str:
+    """One declared source, as the exact string ``peer_allowed`` compares.
+
+    The pod's entrypoint already refuses anything but an exact IPv4 /32
+    (``trusted_ok``); this is the door's second reader of the same rule, and it is
+    deliberately narrow. A shorter prefix would not fail *open* here — the compare
+    is exact — it would fail *silently*: admitting nobody while the configuration
+    says a source was named. So a prefix, a hostname, a second spelling of one
+    address (``010.0.0.2``) and an address no caller arrives from are refused by
+    name, rather than becoming a peer that matches nothing.
+    """
+    address = entry[:-3] if entry.endswith("/32") else entry
+    if "/" in address:
+        raise RenderIncompleteError(f"{key}: {entry!r} is a prefix, not an exact source")
+    octets = address.split(".")
+    if len(octets) != 4 or not all(
+            o.isascii() and o.isdigit() and str(int(o)) == o and int(o) <= 255 for o in octets):
+        raise RenderIncompleteError(f"{key}: {entry!r} is not an IPv4 address")
+    first = int(octets[0])
+    if first in (0, 127) or first >= 224:
+        raise RenderIncompleteError(f"{key}: {entry!r} is not a source a caller arrives from")
+    return address
+
+
+def _sources(declared: str | None, *, key: str) -> tuple[str, ...]:
+    """A rendered source list → the peer tuple. One or more, exact, no empty slots."""
+    if declared is None or not declared.strip():
+        raise RenderIncompleteError(f"{key} is not declared; the render owns this door's addresses")
+    entries = [piece.strip() for piece in declared.split(",")]
+    if not all(entries):
+        raise RenderIncompleteError(f"{key}: {declared!r} has an empty entry; that is not an address")
+    return tuple(_exact_source(entry, key=key) for entry in entries)
+
+
+def retired_keys(render: Mapping[str, str]) -> tuple[str, ...]:
+    """Which retired keys this render still carries, in declaration order."""
+    return tuple(key for key in RETIRED_RENDER_KEYS if key in render)
+
+
+def doors_from_render(render: Mapping[str, str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The door's peers, and the retired keys that were ignored.
+
+    One door is required and there is no second one: `An unset door is a closed
+    door` belongs to a trust list whose absence the pod reports at start; here the
+    absence has no report, so it refuses instead. The retired keys are returned
+    rather than discarded so the caller can say out loud what it ignored.
+    """
+    return (_sources(render.get(RENDER_UI_SOURCES), key=RENDER_UI_SOURCES),
+            retired_keys(render))
+
+
 @dataclass
 class ManagerService:
+    """The Manager's surface: one caller, one peer list, no state of its own.
+
+    `ui_peers` is the whole of the admission policy. There is deliberately no
+    second list: the boundary ruling removed who may ask (Evans, 2026-11-12), and
+    a field for an operator address would be the place the next session puts one
+    back. The render owns the addresses and this module keeps none; `from_render`
+    refuses a door the render never declared rather than handing back a closed one.
+    """
+
     core: OfficeManager
     ui_peers: tuple[str, ...]
-    # The host-WG door's admitted addresses — the only callers `restart-ui`
-    # answers. Both sets are required arguments and neither has a default: the
-    # render owns the addresses, and an unset door is a closed door.
-    operator_peers: tuple[str, ...]
+
+    @classmethod
+    def from_render(cls, core: OfficeManager, *, render: Mapping[str, str]) -> ManagerService:
+        """Build the service from the render's declared door — the only constructor
+        from a render.
+
+        Not a convenience over the dataclass (which stays public, and is how a test
+        builds a door rather than a render): `ui_peers` *is* the admission policy,
+        and until this existed no process built it, so a rendered address had no
+        way in. The dataclass default stands in for nothing here.
+
+        A retired key that the render still carries is warned about and then
+        ignored. Ignoring it silently would leave a reader unable to tell a retired
+        key from a broken one; honouring it would restore the principal the ruling
+        removed.
+
+        The caller is the Manager process. That process does not exist yet, and the
+        listener that would front it is unassigned and unruled: this chooses no
+        address, binds nothing and claims no row.
+        """
+        ui_peers, ignored = doors_from_render(render)
+        for key in ignored:
+            warnings.warn(f"{key} is retired and is ignored: the UI is the Manager's only "
+                          f"caller, so nothing may be admitted as an operator",
+                          RenderKeyRetiredWarning, stacklevel=2)
+        return cls(core=core, ui_peers=ui_peers)
 
     # -- reads -----------------------------------------------------------
     def health(self) -> tuple[int, dict[str, Any]]:
@@ -94,8 +247,8 @@ class ManagerService:
         if action in OPERATOR_ACTIONS:
             # The agent path does not carry the pod verb. This is a refusal by
             # name, not an unknown word: the verb exists, the door does not.
-            return 403, {"detail": (f"{action} is the host operator's verb, admitted at the host-WG "
-                                    "door; it is not carried on the agent path")}
+            return 403, {"detail": (f"{action} is the host operator's verb, carried by the UI on the "
+                                    "operator route; it is not carried on the agent path")}
         if action not in AGENT_ACTIONS:
             return 400, {"detail": f"unknown action {action!r}; it is one of {', '.join(AGENT_ACTIONS)}"}
         if not reason:
@@ -123,25 +276,30 @@ class ManagerService:
         invalidates sessions by construction rather than by an API call reaching
         into another pod's memory.
 
-        Two admissions, one principal (ruled 2026-11-11). The API-source check
-        guards who may reach the port; the authority check guards whose act it is,
-        and it is an allow-list of exactly one: the row must carry both
-        `handle == "babo-ui"` and `actor == "host_operator"`. Everything else — a
-        Lead, a crew agent, a service identity, a session, an unauthenticated local
-        process — is refused here **before effect**, with the class it caught named.
+        One admission, one principal (the boundary ruling, Evans 2026-11-12): the
+        UI is the only thing that talks to the Manager about anything, so it is the
+        only peer that reaches this verb. The authority check guards whose act it
+        is, and it is an allow-list of exactly one: the caller's provenance must be
+        `OPERATOR_SOURCE`, and the agent is not the caller's to name — this handler
+        fixes it at `UI_POD`. Everything else — a Lead, a crew agent, a service
+        identity, a session, an unauthenticated local process, or a name offered
+        without that provenance — is refused here **before effect**, with the class
+        it caught named.
 
         The limit is the ruling's own: this Manager cannot re-derive the operator,
-        so it checks the class token the caller carried. This verb's authority
-        rests on the door that authenticated the operator, and the refusal catches a
-        wrong class, not a forged one.
+        so it checks the class token the UI carried. This verb's authority rests on
+        the session that authenticated the operator at the UI, and the refusal
+        catches a wrong class, not a forged one.
 
         The answer is 202 and it is **best-effort** (Bomu, H-6): replacing the pod
         kills the process that asked, so a client that died mid-request cannot be
         shown a verdict, and no client ever sees this action reach `succeeded` from
         inside that process. The action row is the witness, not the response.
         """
-        if not (peer_allowed(peer, self.ui_peers) or peer_allowed(peer, self.operator_peers)):
-            return 403, {"detail": f"{peer} is not an admitted door for {OPERATOR_ACTIONS[0]}"}
+        if not peer_allowed(peer, self.ui_peers):
+            # One door, because there is one caller (Evans, 2026-11-12). A host
+            # address that used to be the operator's is now simply not the UI's.
+            return 403, {"detail": f"{peer} is not the UI pod"}
         unknown = set(body) - {"reason", "actor", "actor_source", "action_id"}
         if unknown:
             return 400, {"detail": f"unknown field(s): {', '.join(sorted(unknown))}"}
@@ -151,12 +309,12 @@ class ManagerService:
         replay = body.get("action_id")
         if not reason or not actor or not actor_source:
             return 400, {"detail": "missing reason, actor or actor_source"}
-        if actor != OPERATOR_ACTOR:
-            # The allow-list of exactly one, and the refusal names the class it
-            # caught (soro's §8). `actor_source` says which door the claim came
-            # through; it is not the authority, and neither is the peer address.
-            return 403, {"detail": (f"the actor is not a {OPERATOR_ACTOR} (caught {actor!r}); "
-                                    f"{OPERATOR_ACTIONS[0]} carries exactly one class")}
+        if actor_source != OPERATOR_SOURCE:
+            # A name without provenance is a string that satisfied a check, not an
+            # identity (F-7): the door's word is the class, and the name rides with
+            # it. The refusal names the class it caught.
+            return 403, {"detail": (f"the actor's provenance is not the host operator (caught {actor_source!r}); "
+                                    f"{OPERATOR_ACTIONS[0]} admits {OPERATOR_SOURCE!r} only")}
         try:
             action_id = self.core.act(UI_POD, "restart-ui", reason, actor=actor, actor_source=actor_source,
                                       action_id=str(replay) if isinstance(replay, str) and replay else None)
@@ -186,4 +344,98 @@ class ManagerService:
         if record.state not in ("pending", "running", *TERMINAL):
             # A core bug must not reach the UI as a fifth word.
             return 503, {"detail": f"the core reported an unknown action state {record.state!r}"}
-        return 200, {"state": record.state, "detail": record.said}
+        return 200, {"state": record.state, "detail": record.said, "id": record.id,
+                     "handle": record.handle, "action": record.action,
+                     "actor": record.actor, "actor_source": record.actor_source,
+                     "reason": record.reason, "created_at": record.created_at}
+
+    # -- the restart door's read half ------------------------------------
+    def restart_latest(self, peer: str, limit: int = 1) -> tuple[int, dict[str, Any]]:
+        """The latest `restart-ui` row, for the pod that has to live with it.
+
+        The write half (`restart_ui`) replaces the pod and kills the process that
+        asked, so no caller ever sees its verdict from inside. This read is how the
+        replacement finds out what happened to it: after it comes up, it asks the
+        Manager for the newest row on its own door.
+
+        The narrowing is the point (F2, ruled 2026-11-12). The route names one
+        thing and this method asks for one thing: no caller-supplied handle and no
+        caller-supplied verb reaches the query, so there is nothing here that a
+        later party can widen into `?handle=…&verb=…` without editing the door.
+        `limit` is the store's parameter, bounded by this module.
+
+        Four answers, and none of them is a well-formed empty list:
+
+        - ``403`` the caller is not the UI pod. The write admits two doors; this
+          read admits one, because the operator's host does not need to read the
+          pod's own history.
+        - ``503`` the store cannot answer — and it says which of two different
+          things went wrong. A core that exposes no action store at all gets one
+          sentence; a store that is present and raises gets another, carrying its own
+          words. The office looks broken rather than clean either way: "no restart"
+          is a claim, and a read that did not happen cannot make it.
+        - ``404`` the store is readable and holds no such row. Said out loud, so a
+          consumer that is really a yes/no has to answer "there is no restart".
+        - ``200`` ``{"actions": [...], "count": n}``, newest first, each row in the
+          same wire names the single-row read uses — `detail`, not `said` — and
+          never `boot_id`.
+        """
+        if not peer_allowed(peer, self.ui_peers):
+            return 403, {"detail": f"{peer} is not the UI pod"}
+        if limit < 1 or limit > RESTART_READ_MAX:
+            # A limit of zero would return exactly the empty answer §4 forbids, and
+            # an unbounded limit is the collection endpoint by another name.
+            return 400, {"detail": (f"limit is between 1 and {RESTART_READ_MAX}; this route names "
+                                     f"the latest {OPERATOR_ACTIONS[0]}, not a listing")}
+        store = getattr(self.core, "store", None)
+        if not isinstance(store, _ActionStore):
+            # Absence, said as absence, and only that. `@runtime_checkable` checks
+            # that the attribute is *there*; it is not a signature check, and wrong
+            # shapes walk through it. So this is the cheap pre-check and the call
+            # below is the real one — which is why the two failures get two
+            # sentences rather than one sentence pretending to be a shape check.
+            return 503, {"detail": ("the core exposes no action store; the office cannot say whether "
+                                     "a restart happened")}
+        try:
+            # Parameterised here, inside, and nowhere else: the pod is the row's
+            # handle and the door is the row's verb, both fixed by this module.
+            rows = list(store.actions(handle=UI_POD, verbs=OPERATOR_ACTIONS, limit=limit))
+        except Exception as exc:
+            # A store that is present and cannot answer is a different fact from a
+            # core that never had one, and the two must not share a sentence.
+            return 503, {"detail": f"the core's store could not be read: {exc}"}
+        if not rows:
+            return 404, {"detail": f"no {OPERATOR_ACTIONS[0]} row is recorded here; there is no restart to read"}
+        for row in rows:
+            if row.state not in ("pending", "running", *TERMINAL):
+                # Same guard as the single-row read: a fifth word is a core bug and
+                # must not reach a page as a status nobody can render.
+                return 503, {"detail": f"the core reported an unknown action state {row.state!r}"}
+        return 200, {"actions": [self._row(row) for row in rows], "count": len(rows)}
+
+    @staticmethod
+    def _row(row: _ActionRowLike) -> dict[str, Any]:
+        """One stored row in the wire names ``action()`` already uses.
+
+        `detail` is the wire name for the row's `said` column and `action` for its
+        `verb`; those two spellings were ruled (contract §2) because the single-row
+        read is already on the wire. Two endpoints teaching two clients two names
+        is the failure, so this projects field for field the same shape — if anyone
+        ever moves it, they move both reads together.
+
+        `created_at` is here because the endpoint's purpose needs it: a pod that came
+        up inside a restart cannot otherwise tell *the restart that made me* from *a
+        restart aimed at me*. It also makes "newest first" falsifiable by the caller
+        instead of a claim the door makes about itself.
+
+        The stamp is rendered in the house's zone (`core.house_time`) exactly as the
+        single-row read renders it: the store keeps one offset because it compares
+        these strings, and a caller is owed the zone the house lives in. Imported
+        here, not at module scope, so this surface stays importable without the core.
+        """
+        from babo.office.core import house_time
+
+        return {"state": row.state, "detail": row.said, "id": row.id,
+                "handle": row.handle, "action": row.verb,
+                "actor": row.actor, "actor_source": row.actor_source,
+                "reason": row.reason, "created_at": house_time(row.created_at)}

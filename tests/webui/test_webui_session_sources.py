@@ -10,6 +10,7 @@ operator action and by process restart.
 from __future__ import annotations
 
 import json
+import socket
 from types import SimpleNamespace
 
 import pytest
@@ -42,6 +43,23 @@ def _bootstrap(handler: GatewayHTTPHandler, peer: str, headers: dict[str, str] |
     connection = SimpleNamespace(remote_address=(peer, 5000))
     request = Request("/webui/bootstrap", Headers({"Host": "10.0.0.2:18790", **(headers or {})}))
     return handler._handle_bootstrap(connection, request).status_code
+
+
+def _transport(family: int) -> SimpleNamespace:
+    """A websockets-style transport whose socket reports ``family`` (bomu F1).
+
+    ``is_unix_socket_peer`` refuses a connection that reports no address unless
+    the transport can show the socket really is AF_UNIX. The double therefore
+    answers ``get_extra_info("socket")`` the way the real transport does: with a
+    socket object, and with the caller's default for every other key.
+    """
+
+    def get_extra_info(name: str, default: object = None) -> object:
+        if name == "socket":
+            return SimpleNamespace(family=family)
+        return default
+
+    return SimpleNamespace(get_extra_info=get_extra_info)
 
 
 def _handler(trusted: list[str]) -> GatewayHTTPHandler:
@@ -146,8 +164,17 @@ def test_the_listeners_unix_socket_is_local_and_needs_no_trust_entry() -> None:
     handler._runtime_surface = "webui"
     handler._capabilities = {}
 
-    unix_peer = SimpleNamespace(remote_address=None)
+    unix_peer = SimpleNamespace(remote_address=None, transport=_transport(socket.AF_UNIX))
     assert is_unix_socket_peer(unix_peer)
+
+    # F1 (bomu): absent evidence is not permission. A connection that reports no
+    # address but cannot be shown to be AF_UNIX is refused, not assumed local —
+    # "local" here is exactly "needs no token".
+    assert not is_unix_socket_peer(SimpleNamespace(remote_address=None))
+    assert not is_unix_socket_peer(SimpleNamespace(remote_address=None,
+                                                   transport=_transport(socket.AF_INET)))
+    assert is_unix_socket_peer(SimpleNamespace(remote_address=None,
+                                               transport=_transport(socket.AF_UNIX)))
     request = Request("/webui/bootstrap", Headers({"Host": "localhost"}))
     assert handler._handle_bootstrap(unix_peer, request).status_code == 200
     assert handler.tokens.api_tokens, "the in-pod command gets a session without a network trust entry"
