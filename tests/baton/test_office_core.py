@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from babo.office.api import ActionRecord
+from babo.office.api import ACTIONS, ActionRecord
 from babo.office.audit import Store
 from babo.office.core import (
     HANDLE_LABEL,
@@ -19,11 +20,18 @@ from babo.office.core import (
     CoreRefusalError,
     Identity,
     NativeManager,
+    Refusal,
     UnknownActionError,
+    _event,
     decide,
 )
 from babo.office.credentials import CredentialLedger, FileAdapter, Minted, TokenAdapter
-from babo.office.runtime import ContainerFacts, LaunchSpec
+from babo.office.runtime import (
+    ContainerFacts,
+    LaunchSpec,
+    RuntimeUnavailableError,
+    RuntimeVerdictError,
+)
 from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
@@ -45,14 +53,34 @@ def _manager(tmp_path: Path, runtime: RecordingRuntime, **kw) -> NativeManager:
         ),
     )
     kw.setdefault("executor", lambda fn: fn())
+    clock = kw.pop("clock", NOW)
     deadline = kw.pop("deadline", 5.0)
     return NativeManager(store=Store(tmp_path / "m.db"), runtime=runtime,
-                         ledger=_ledger(tmp_path), clock=NOW, deadline=deadline, **kw)
+                         ledger=_ledger(tmp_path), clock=clock, deadline=deadline, **kw)
 
 
 def _alive(handle: str = "agent-a") -> ContainerFacts:
     return ContainerFacts(name=handle, state="running", ip="10.89.0.42",
                           labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle})
+
+
+def _last_event(manager: NativeManager, handle: str) -> str:
+    """The newest audit row's event word for a handle — what the record says."""
+    rows = manager.store.audit(handle=handle)
+    assert rows, f"no audit row for {handle}"
+    return rows[-1].event
+
+
+def _ticking_clock(stamps: list[str]):
+    """Each call returns the next stamp, then repeats the last — no sleeps."""
+    seen = {"i": 0}
+
+    def tick() -> str:
+        index = min(seen["i"], len(stamps) - 1)
+        seen["i"] += 1
+        return stamps[index]
+
+    return tick
 
 
 def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) -> None:
@@ -61,7 +89,14 @@ def test_unknown_verb_is_refused_before_a_row_or_a_runtime_call(tmp_path: Path) 
     manager = _manager(tmp_path, runtime)
     with pytest.raises(CoreRefusalError) as caught:
         manager.act("agent-a", "explode", "because", actor="evans", actor_source="terminal")
-    assert "it is one of spawn, wake, freeze, rescue, destroy, restart-ui" in str(caught.value)
+    # Exact equality, not a substring, and that is the whole point of the pin.
+    # `ACTIONS` is the union of the two doors, so a verb appended to the operator
+    # door prints *after* `restart-ui`: a substring assertion is still satisfied by
+    # the prefix and the test goes silent exactly when the vocabulary widens.
+    # Equality catches an append, a drop and a reordering, in either door.
+    assert str(caught.value) == (
+        "unknown action 'explode'; it is one of spawn, wake, freeze, rescue, destroy, restart-ui"
+    )
     assert manager.store.actions() == []
     assert runtime.calls == []
 
@@ -73,7 +108,9 @@ def test_no_actor_is_refused_and_the_refusal_is_durable(tmp_path: Path) -> None:
     action_id = manager.act("agent-a", "freeze", "because", actor="")
     record = manager.action(action_id)
     assert record.state == "refused"
-    assert "no approval recorded for agent-a (asked by <none>)" in record.said
+    # F13: the gate's sentence names the verb, because the word beside it
+    # (`REFUSED`) is bare by design and carries no verb of its own.
+    assert "no approval recorded for 'freeze' on agent-a (asked by <none>)" in record.said
     assert runtime.calls == []
     assert manager.store.audit(event="REFUSED")[0].actor == "<none>"
 
@@ -83,7 +120,7 @@ def test_an_actor_without_provenance_is_refused_with_its_own_detail(tmp_path: Pa
     manager = _manager(tmp_path, RecordingRuntime())
     record = manager.action(manager.act("agent-a", "freeze", "because", actor="owner"))
     assert record.state == "refused"
-    assert "no actor source recorded for agent-a (asked by owner)" in record.said
+    assert "no actor source recorded for 'freeze' on agent-a (asked by owner)" in record.said
     row = manager.store.get_action(record.id)
     assert row is not None and row.actor == "owner" and row.actor_source == ""
 
@@ -92,7 +129,7 @@ def test_no_reason_is_refused_and_names_the_actor(tmp_path: Path) -> None:
     manager = _manager(tmp_path, RecordingRuntime())
     record = manager.action(manager.act("agent-a", "freeze", "  ", actor="evans", actor_source="terminal"))
     assert record.state == "refused"
-    assert "no reason recorded for agent-a (asked by evans via terminal)" in record.said
+    assert "no reason recorded for 'freeze' on agent-a (asked by evans via terminal)" in record.said
 
 
 def test_refused_actions_leave_no_podman_effect(tmp_path: Path) -> None:
@@ -121,6 +158,10 @@ def test_wake_on_an_awake_agent_succeeds_with_its_own_detail(tmp_path: Path) -> 
     assert record.state == "succeeded"
     assert record.said == "agent-a is already alive; nothing to wake"
     assert ("run", "agent-a") not in runtime.calls
+    # F13: the no-op is a wake, so its word is WAKE. This is the row that a table
+    # collapsing wake into SPAWN would get wrong, and the reason the door keeps
+    # its own base.
+    assert _last_event(manager, "agent-a") == "WAKE"
 
 
 def test_spawn_on_an_awake_agent_resolves_to_the_existing_pod(tmp_path: Path) -> None:
@@ -133,6 +174,9 @@ def test_spawn_on_an_awake_agent_resolves_to_the_existing_pod(tmp_path: Path) ->
     assert record.state == "succeeded"
     assert "already alive; nothing to spawn (existing pod)" in record.said
     assert ("run", "agent-a") not in runtime.calls
+    # F13's `_settle` row: the no-op still says SPAWN, and now asks the same table
+    # every other spawn row asks.
+    assert _last_event(manager, "agent-a") == "SPAWN"
 
 
 def test_spawn_on_a_starting_record_does_not_create_a_second_pod(tmp_path: Path) -> None:
@@ -235,6 +279,8 @@ def test_a_stand_down_that_never_completes_is_timeout_not_failed(tmp_path: Path)
     assert "outcome is unknown" in record.said
     # the pod is still there and no credential was revoked on a guess
     assert runtime.facts["agent-a"].alive
+    # F13: `FREEZE` would describe a success the core did not observe.
+    assert _last_event(manager, "agent-a") == "FREEZE_TIMEOUT"
 
 
 def test_destroy_revokes_before_it_removes_and_names_a_partial_failure(tmp_path: Path) -> None:
@@ -260,6 +306,9 @@ def test_destroy_revokes_before_it_removes_and_names_a_partial_failure(tmp_path:
     assert "did not remove the pod" in record.said
     assert manager.store.get_credential(row.id).state == "open"  # revoke tried, failed honestly
     assert manager.store.audit(event="CREDENTIAL_REVOKE_PARTIAL")
+    # F13: the cell that already had a word keeps it — a destroy that ran and did
+    # not finish is PARTIAL, not a family failure.
+    assert _last_event(manager, "agent-a") == "TEARDOWN_PARTIAL"
 
 
 def test_destroy_success_revokes_credentials_and_writes_one_teardown_row(tmp_path: Path) -> None:
@@ -400,8 +449,14 @@ def test_unknown_action_id_is_not_found_not_a_synthesised_failure(tmp_path: Path
 
 def test_the_manager_satisfies_the_office_interface(tmp_path: Path) -> None:
     from babo.office.api import OfficeManager
+    from babo.office.service import _ActionStore
 
     assert isinstance(_manager(tmp_path, RecordingRuntime()), OfficeManager)
+    # The door's own requirement, asserted beside the interface's: the restart read
+    # reaches the store through the core, so a core that lost `.store` (or lost
+    # `actions` on it) is a door requirement broken — not something only the join
+    # test in another file would notice.
+    assert isinstance(_manager(tmp_path, RecordingRuntime()).store, _ActionStore)
     assert isinstance(_manager(tmp_path, RecordingRuntime()).action, object)
     assert ActionRecord(id="x", handle="a", action="spawn").terminal is False
 
@@ -444,7 +499,7 @@ def test_restart_ui_with_no_ui_pod_is_refused_and_names_the_pod(tmp_path: Path) 
     record = manager.action(manager.act(UI, "restart-ui", "sessions leaked", actor="evans",
                                         actor_source="terminal"))
     assert record.state == "refused"
-    assert record.said == "nothing to restart: no babo-ui pod"
+    assert record.said == "nothing to restart-ui: no babo-ui pod"
     assert runtime.calls == [("inspect", UI)]
 
 
@@ -456,7 +511,7 @@ def test_restart_ui_on_a_pod_that_is_not_alive_names_the_state(tmp_path: Path) -
     record = manager.action(manager.act(UI, "restart-ui", "x", actor="evans",
                                         actor_source="terminal"))
     assert record.state == "refused"
-    assert record.said == "nothing to restart: babo-ui is exited, not alive"
+    assert record.said == "nothing to restart-ui: babo-ui is exited, not alive"
     assert ("remove", UI) not in runtime.calls
 
 
@@ -500,10 +555,163 @@ def test_a_direct_execute_cannot_spawn_a_second_pod(tmp_path: Path) -> None:
     manager = _manager(tmp_path, runtime)
     row = manager.store.create_action(action_id="direct", handle="agent-a", verb="spawn",
                                       actor="evans", reason="r", boot_id="b1", at=NOW())
-    state, said, _ = manager._execute(row, Identity("kimi", "project-x"))  # noqa: SLF001
+    state, said = manager._execute(row, Identity("kimi", "project-x"))  # noqa: SLF001
     assert state == "succeeded"
     assert "existing pod" in said
     assert [call for call in runtime.calls if call[0] == "run"] == []
+
+
+def test_restart_ui_on_an_agent_handle_is_refused_by_name_before_any_io(tmp_path: Path) -> None:
+    # F3 (bomu): the handle is the pod's name. The boundary refuses the caller's
+    # claim rather than rewriting it — no runtime read, no store read, no row, and
+    # the sentence names `babo-ui` so the caller sees which handle was true.
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime, ui_spec=_ui_spec)
+    with pytest.raises(CoreRefusalError) as caught:
+        manager.act("agent-a", "restart-ui", "because", actor="evans", actor_source="terminal")
+    assert str(caught.value) == (
+        "restart-ui acts on babo-ui, not 'agent-a'; the handle is the pod's name"
+    )
+    assert manager.store.actions() == []
+    assert runtime.calls == []
+
+
+def test_the_decision_table_carries_the_same_assertion_as_the_second_wall() -> None:
+    # Pure, so any future road that reaches a verdict inherits it even without
+    # `act()`. One sentence, two gates — the same shape as the spawn no-op.
+    verdict = decide("restart-ui", _ui_pod(), None, "agent-a")
+    assert isinstance(verdict, Refusal)
+    assert verdict.detail == (
+        "restart-ui acts on babo-ui, not 'agent-a'; the handle is the pod's name"
+    )
+
+
+def test_a_runtime_that_vanishes_mid_spawn_is_timeout_not_failed(tmp_path: Path) -> None:
+    # F10: `failed` means the runtime returned an error, and it does not assert the
+    # effect; a runtime that cannot be read returned nothing at all, which is no
+    # verdict (api.py's closed set). This is the handler that writes the row — the
+    # thing someone reads a week later to learn what happened to the pod.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    real_inspect = runtime.inspect_container
+    seen = {"n": 0}
+
+    def inspect_then_vanish(name: str) -> ContainerFacts | None:
+        seen["n"] += 1
+        if seen["n"] > 1:  # act() reads once; the executor's re-read is where it goes
+            raise RuntimeUnavailableError("socket went away")
+        return real_inspect(name)
+
+    runtime.inspect_container = inspect_then_vanish  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "timeout"
+    assert record.said == (
+        "the command returned no usable verdict (socket went away); effect unstated"
+    )
+    # Opposite polarity from the expired-deadline row: this one *did* start, and that
+    # is the column that separates the two `timeout` sites in the record.
+    assert manager.store.get_action(record.id).started_at is not None
+    # No effectful call follows the failing read: no `run`, no `remove`.
+    assert [call for call in runtime.calls if call[0] in ("run", "remove")] == []
+    # F13's first row: a spawn that timed out is not `SPAWN_FAILED` — the runtime
+    # never returned that verdict. The word says `timeout` because the state does.
+    assert _last_event(manager, "agent-a") == "SPAWN_TIMEOUT"
+
+
+def test_a_missing_control_port_refuses_and_says_nothing_was_attempted(
+    tmp_path: Path,
+) -> None:
+    # F10: the default port answers that it will not act, so the effect was never
+    # dispatched — `refused`, not `timeout` (no deadline is involved and a verdict did
+    # arrive), and not `failed` (nothing was tried and it did not break).
+    runtime = RecordingRuntime(facts={"agent-a": _alive()})
+    manager = _manager(tmp_path, runtime)  # no agent_control wired
+    record = manager.action(manager.act("agent-a", "freeze", "because", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "refused"
+    assert record.said == (
+        "no stand-down handshake is configured for agent-a; refusing to kill the pod "
+        "(a freeze preserves work, L-06); nothing was attempted"
+    )
+    assert [call for call in runtime.calls if call[0] in ("run", "remove")] == []
+
+
+def test_an_executor_that_raises_is_failed_with_the_effect_left_open(tmp_path: Path) -> None:
+    # The one handler that keeps `failed`: the path raised after dispatch, so it acted
+    # and broke — and the sentence still refuses to claim what the effect was.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def boom(spec: LaunchSpec) -> ContainerFacts:
+        raise ValueError("boom")
+
+    runtime.run = boom  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert record.said == (
+        "ValueError: boom; dispatched and interrupted before a verdict, "
+        "so whether it took effect is unknown"
+    )
+
+
+def test_a_runtime_verdict_is_failed_and_names_the_rc(tmp_path: Path) -> None:
+    # F12: a non-zero rc is a verdict that arrived. `timeout` is for silence, so the
+    # row is `failed` — and `failed` still does not assert the effect, which the
+    # sentence says rather than leaving the reader to guess.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def refuse(spec: LaunchSpec) -> ContainerFacts:
+        raise RuntimeVerdictError("podman run failed (rc=125): image not found")
+
+    runtime.run = refuse  # type: ignore[method-assign]
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert record.said == (
+        "podman run failed (rc=125): image not found; the effect is not asserted"
+    )
+    # F13: a returned verdict is a failure that arrived, so it gets the failure
+    # word — never `SPAWN_TIMEOUT`, which is the row for silence.
+    assert _last_event(manager, "agent-a") == "SPAWN_FAILED"
+
+
+def test_a_deadline_that_passes_before_the_worker_starts_attempts_nothing(
+    tmp_path: Path,
+) -> None:
+    # F11: the row was created and the worker looked at it after the deadline. Nothing
+    # was attempted; `started_at is None` is the machine-readable form of that, and it
+    # is what keeps the sentence and the record agreeing by construction.
+    runtime = RecordingRuntime()
+    clock = _ticking_clock(["2026-11-11T00:00:00+00:00", "2026-11-11T00:00:06+00:00",
+                            "2026-11-11T00:00:07+00:00"])
+    manager = _manager(tmp_path, runtime, clock=clock, deadline=5.0)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "timeout"
+    assert record.said == "nothing was attempted: the deadline passed before execution"
+    assert manager.store.get_action(record.id).started_at is None
+    # `act()` inspects before `decide()` for every verb, so one inspect is expected;
+    # nothing *effectful* may appear.
+    assert [call for call in runtime.calls if call[0] != "inspect"] == []
+
+
+def test_the_same_row_started_in_time_is_executed_normally(tmp_path: Path) -> None:
+    # The control: the branch is reachable in both directions, so the assertions above
+    # are about the deadline and not about spawn being broken.
+    runtime = RecordingRuntime()
+    clock = _ticking_clock(["2026-11-11T00:00:00+00:00", "2026-11-11T00:00:01+00:00",
+                            "2026-11-11T00:00:02+00:00"])
+    manager = _manager(tmp_path, runtime, clock=clock, deadline=5.0)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"
+    assert manager.store.get_action(record.id).started_at is not None
+    assert [call for call in runtime.calls if call[0] == "inspect"] == [
+        ("inspect", "agent-a"), ("inspect", "agent-a")
+    ]
 
 
 def test_the_ui_pod_is_never_listed_as_an_agent(tmp_path: Path) -> None:
@@ -516,3 +724,155 @@ def test_the_ui_pod_is_never_listed_as_an_agent(tmp_path: Path) -> None:
     assert "agent-a" in handles
     action_id = manager.act(UI, "restart-ui", "x", actor="evans", actor_source="terminal")
     assert manager.action(action_id).handle == UI
+
+
+def test_the_event_word_is_a_projection_of_the_verb_and_the_state() -> None:
+    """F13: one input class, one word — and no word borrowed from another class.
+
+    The defect this pins: a spawn that timed out wrote ``SPAWN_FAILED`` (a verdict
+    the runtime never returned), a freeze that timed out wrote ``FREEZE``
+    (indistinguishable from success), and every unmapped pair fell through to
+    ``REFUSED`` — a word that asserts a specific non-event. The pair is the input;
+    the table is the vocabulary.
+    """
+    # the two rows that were wrong on one input class
+    assert _event("spawn", "timeout") == "SPAWN_TIMEOUT"
+    assert _event("freeze", "timeout") == "FREEZE_TIMEOUT"
+    # every verb keeps its own failure word rather than borrowing a sibling's
+    assert _event("spawn", "failed") == "SPAWN_FAILED"
+    assert _event("freeze", "failed") == "FREEZE_FAILED"
+    assert _event("rescue", "failed") == "RESCUE_FAILED"
+    assert _event("destroy", "timeout") == "TEARDOWN_TIMEOUT"
+    assert _event("restart-ui", "timeout") == "UI_RESTART_TIMEOUT"
+    # wake has its own base: the door is not collapsed into SPAWN (F9 is parked;
+    # the *effect* branch is shared, the *word* is not)
+    assert _event("wake", "succeeded") == "WAKE"
+    assert _event("wake", "failed") == "WAKE_FAILED"
+    assert _event("wake", "timeout") == "WAKE_TIMEOUT"
+    # the cells that already had words keep them, unchanged
+    assert _event("spawn", "succeeded") == "SPAWN"
+    assert _event("freeze", "succeeded") == "FREEZE"
+    assert _event("rescue", "succeeded") == "RESCUE"
+    assert _event("destroy", "succeeded") == "TEARDOWN"
+    assert _event("destroy", "failed") == "TEARDOWN_PARTIAL"
+    assert _event("restart-ui", "succeeded") == "UI_RESTART"
+    assert _event("restart-ui", "failed") == "UI_RESTART_FAILED"
+    # a refusal is the one bare word, because a refusal is not an event
+    assert _event("destroy", "refused") == "REFUSED"
+    # and a pair with no cell is named, never borrowed, never raised
+    assert _event("unknown", "succeeded") == "EVENT_UNMAPPED"
+    assert _event("spawn", "halfway") == "EVENT_UNMAPPED"
+
+
+def test_a_missing_cell_writes_the_named_fallback_and_the_action_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # F13's ruling: totality belongs in the test, so at write time a missing cell
+    # must neither raise into the executor nor borrow a word that means something
+    # else. The pod is made, the row is settled, and the word says what happened to
+    # the *table* — which is a defect, audibly marked — not a claim about the pod.
+    from babo.office import core
+
+    incomplete = {pair: word for pair, word in core.EVENT_TABLE.items()
+                  if pair != ("spawn", "succeeded")}
+    monkeypatch.setattr(core, "EVENT_TABLE", incomplete)
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "succeeded"          # nothing raised into the executor
+    assert ("run", "agent-a") in runtime.calls  # the effect happened
+    assert _last_event(manager, "agent-a") == "EVENT_UNMAPPED"
+
+
+@pytest.mark.parametrize("verb", ACTIONS)
+def test_every_refused_row_names_the_verb_it_refused(
+    tmp_path: Path, verb: str,
+) -> None:
+    # F13's condition on the bare `REFUSED`: a refusal is a non-event, so the word
+    # carries nothing — the sentence has to carry the verb, or the row asserts less
+    # than the contract implies (F11's shape). One row per verb, through `act`'s gate.
+    handle = UI if verb == "restart-ui" else "agent-a"
+    manager = _manager(tmp_path, RecordingRuntime())
+    record = manager.action(manager.act(handle, verb, "because", actor=""))
+    assert record.state == "refused"
+    assert verb in record.said, record.said
+    assert _last_event(manager, handle) == "REFUSED"
+
+
+@pytest.mark.parametrize("verb", ACTIONS)
+def test_every_precondition_refusal_names_the_verb_it_refused(
+    tmp_path: Path, verb: str,
+) -> None:
+    # The other half of the same rule: `decide`'s verdicts. No runtime, no identity —
+    # every verb refuses for its own reason, and each reason spells the verb as the
+    # vocabulary spells it (`restart-ui`, not `restart`).
+    handle = UI if verb == "restart-ui" else "agent-a"
+    manager = _manager(tmp_path, RecordingRuntime(), identity_of=None)
+    record = manager.action(manager.act(handle, verb, "because", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "refused"
+    assert verb in record.said, record.said
+    assert _last_event(manager, handle) == "REFUSED"
+
+
+def test_a_branch_that_returns_a_word_outside_the_contract_still_settles_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # F15: the state word is checked where `_run` receives it. A future branch
+    # returning `running` used to raise out of `_finish` *after* the effect, leaving
+    # the row at `running` for ever — the record of an action that happened, gone.
+    # It is now settled as a failure that names the core's own defect.
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime)
+
+    def running_branch(self, row, identity):  # the branch that has not learned the contract
+        return "running", "the pod was made and the branch forgot its word"
+
+    monkeypatch.setattr(NativeManager, "_execute", running_branch)
+    record = manager.action(manager.act("agent-a", "spawn", "first", actor="evans",
+                                        actor_source="terminal"))
+    assert record.state == "failed"
+    assert "non-terminal verdict 'running'" in record.said
+    assert "settled as failed rather than orphaned" in record.said
+    # settled, not orphaned: the row has a finish stamp and a terminal word
+    stored = manager.store.get_action(record.id)
+    assert stored is not None and stored.finished_at is not None
+    assert _last_event(manager, "agent-a") == "SPAWN_FAILED"
+
+
+def test_the_store_writes_one_offset_and_the_read_renders_the_house(tmp_path: Path) -> None:
+    # Bomu's ruling, as a row: the store keeps ONE offset — UTC, the one every row
+    # already has — because `created_at` is compared and sorted as text; the house's
+    # zone is rendering, and rendering happens where an agent reads. This manager
+    # has **no clock argument**: the production wiring, because an injected clock
+    # proves the wiring and never the default.
+    manager = NativeManager(store=Store(tmp_path / "m.db"), runtime=RecordingRuntime(),
+                            ledger=_ledger(tmp_path))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans",
+                                        actor_source="terminal"))
+
+    stored = manager.store.get_action(record.id)
+    assert stored is not None
+    assert stored.created_at.endswith("+00:00"), stored.created_at      # the store's one offset
+
+    house = datetime.now(ZoneInfo("America/Detroit"))
+    rendered = datetime.fromisoformat(record.created_at)                 # parses
+    assert rendered.utcoffset() == house.utcoffset(), record.created_at   # carries -05:00
+    assert abs((rendered - house).total_seconds()) < 60, record.created_at
+    assert rendered == datetime.fromisoformat(stored.created_at)         # same instant, two clothes
+
+
+def test_the_restart_read_renders_the_house_zone_like_the_single_row_read(
+    tmp_path: Path,
+) -> None:
+    # The other API projection. Two endpoints teaching two clients two spellings is
+    # the failure; both render, and both render the same instant.
+    from babo.office.service import ManagerService
+
+    manager = NativeManager(store=Store(tmp_path / "m.db"), runtime=RecordingRuntime(),
+                            ledger=_ledger(tmp_path))
+    record = manager.action(manager.act("agent-a", "freeze", "stand down", actor="evans",
+                                        actor_source="terminal"))
+    payload = ManagerService._row(manager.store.get_action(record.id))
+    assert payload["created_at"] == record.created_at

@@ -21,8 +21,35 @@ Rules the implementation owes this interface (not restated anywhere else):
   disagreement between the runtime and the record is reported as `unknown` with
   a `note`, never resolved by preference.
 - **Lifecycle is terminal-state honest.** `succeeded | failed | refused |
-  timeout` are distinct: `refused` means the core declined before acting,
-  `failed` means it acted and broke, `timeout` means no verdict arrived.
+  timeout` are distinct, and what separates them is whether the core accepted the
+  action and whether the word asserts the effect:
+
+  - `refused` — the core declined before acting.
+  - `failed` — accepted, and returned an error; the effect is **not** asserted.
+  - `timeout` — accepted, and no verdict arrived; the effect is **not** asserted.
+    It covers both sites: an action interrupted before a verdict (the row's
+    `started_at` is set) and a deadline that passed before anything was attempted
+    (`started_at` is `NULL` — the machine-readable form of "nothing was
+    attempted"). "Accepted" is the right noun for both: the core took the action
+    on, and then either it was interrupted or its deadline expired. "Dispatched"
+    would be false for the second site.
+  - `succeeded` — accepted, and **the effect is asserted**: the pod is up, the
+    work is frozen, the UI was replaced. The `202`'s honesty rests on this word
+    meaning that; no other word may borrow it.
+
+  When the effect is unknown, the row's own sentence says so; the choice of word
+  records what was observed, never the effect. And when the core knows nothing was
+  attempted, the row must say that rather than leave the reader to infer it.
+
+  What lands here is decided by `runtime.py`'s classifier, not by the exit status.
+  A non-zero `rc` naming the object (absent, "image not found") is an answer and
+  becomes `failed`; one naming an unreachable service, or naming nothing we
+  recognise, is silence and stays `timeout`. Silence is the default because
+  claiming a verdict is the stronger claim. So a `timeout` row may mean the tool was
+  not there, it timed out, or it exited with a message we could not read — and the
+  row's own sentence, not the state word, says which. "Could not be read" stays
+  where the read genuinely failed, and is deliberately absent from the executor's
+  sentence, which also covers the message we could not read.
 - **Verbs are idempotent.** Waking an awake agent is a success that says so;
   it is not an error and not a fake restart.
 - **Credential rows carry identity only**: id, scope, issued/expires. The core
@@ -36,29 +63,31 @@ from typing import Protocol, cast, runtime_checkable
 
 from babo.office.model import AgentObserved
 
-# The closed action vocabulary. `restart-ui` is the cross-pod half of revocation:
-# it asks the Manager to replace the UI pod, which invalidates every in-memory
+# The closed action vocabulary is a partition of two doors, each written as a
+# literal — never one list plus an exclusion. An allow-list built by filtering a
+# name out is a deny-list of one, and a deny-list is exactly the row a seventh
+# verb slips past the day someone adds it. `tests/baton/test_office_vocabulary.py`
+# asserts the shape: the union of the doors is ACTIONS, the intersection is empty,
+# every verb is in exactly one door, and each door's membership is a decision
+# recorded here rather than a consequence of a filter.
+
+# The five lifecycle verbs an agent handle may carry (L-01).
+AGENT_ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy")
+
+# The host operator's door: `restart-ui` is the cross-pod half of revocation — it
+# asks the Manager to replace the UI pod, which invalidates every in-memory
 # session by construction (D-12: revocation is owned by the pod holding the store).
-ACTIONS = ("spawn", "wake", "freeze", "rescue", "destroy", "restart-ui")
-
-# The verbs an agent handle can carry: everything but the pod verb. `restart-ui`
-# is deliberately absent — its handle is the UI pod and its caller is the host
-# operator, so it is never offered on an agent row and never accepted on the
-# agent path (L-10's standing, ruled 2026-11-11). The vocabulary above stays six
-# verbs; what narrows is the door, not the word.
-AGENT_ACTIONS = tuple(verb for verb in ACTIONS if verb != "restart-ui")
-
-# The one verb the host operator may invoke, and the class token that authorizes
-# it — an allow-list of exactly one (soro's §8 ruling, 2026-11-11). The check is
-# `actor == OPERATOR_ACTOR`, never a deny-list of the classes we happened to think
-# of: a deny-list is a row a sixth class slips past the day someone adds one.
+# Its handle is the UI pod and its caller is the host operator (L-10's standing,
+# ruled 2026-11-11), so it is never offered on an agent row and never accepted on
+# the agent path. The authorizing class word is the *provenance*,
+# `actor_source == "host-wg"`, not a literal actor token (soro's §8 ruling,
+# corrected 2026-11-11); the actor is the operator's own name beside it.
 OPERATOR_ACTIONS = ("restart-ui",)
-OPERATOR_ACTOR = "host_operator"
-
-# The word the door's own authentication carries. Transport peer identity is not
-# operator authority (the ruling's first half): this names *where* the claim came
-# from — the host-WG door — while OPERATOR_ACTOR names the only class admitted.
 OPERATOR_SOURCE = "host-wg"
+
+# The one closed set the surface, the core and the tests agree on. Order matters:
+# it is the order refusals print and the order the page offers.
+ACTIONS = AGENT_ACTIONS + OPERATOR_ACTIONS
 
 # Terminal states, verbatim. Anything else is still in flight.
 TERMINAL = ("succeeded", "failed", "refused", "timeout")
@@ -82,6 +111,19 @@ class ActionRecord:
     action: str
     state: str = "pending"
     said: str = ""
+    # The read half of the audit row (D-12's contradiction, ruled 2026-11-11):
+    # the UI is the post-restart reader, so the row it polls must name who asked
+    # and why. These are projection fields only — the write contract is unchanged,
+    # and nothing here is a second store.
+    actor: str = ""
+    actor_source: str = ""
+    reason: str = ""
+    # When the row was created, projected for the same reason and under the same
+    # rule: a reader that came up inside a restart has to tell *the restart that
+    # made me* from *a restart aimed at me*, and without a timestamp it cannot.
+    # The column already exists on the store row, so this is a projection and not
+    # new state.
+    created_at: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in ("pending", "running", *TERMINAL):

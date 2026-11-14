@@ -62,6 +62,14 @@ def test_json_presets_reject_invalid_configuration(preset_data: dict, invalid_pa
 
 @pytest.mark.parametrize("target", ["wheel", "sdist"])
 def test_distributions_bundle_webui_and_channel_resources(tmp_path: Path, target: str) -> None:
+    # The build backend is a declared dev dependency, not a runtime one. Without it
+    # this test reports a red about the environment rather than about the package —
+    # which is worse than saying nothing, because it trains people to ignore a
+    # failing packaging test. Say what is missing instead.
+    pytest.importorskip(
+        "hatchling.build",
+        reason="builds a real wheel and sdist, so it needs the build backend (dev extra)",
+    )
     repository = Path(__file__).resolve().parents[2]
     for name in ("pyproject.toml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         shutil.copyfile(repository / name, tmp_path / name)
