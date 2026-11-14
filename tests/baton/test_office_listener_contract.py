@@ -16,6 +16,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import fields as dataclass_fields
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -64,9 +65,13 @@ def test_every_path_the_client_calls_is_answered_by_the_listener() -> None:
     # seventh method, so the public surface of the client is asserted against the
     # six this file knows how to serve: adding a method to HopClient turns this row
     # red until it is both enumerated above and answered below.
-    assert {name for name in dir(hop.HopClient) if not name.startswith("_")} == {
+    # Fields are excluded by construction: HopClient is a dataclass, so its fields
+    # answer to dir() as surely as its methods do, and a field is not a call.
+    fields = {field.name for field in dataclass_fields(hop.HopClient)}
+    visible = {name for name in dir(hop.HopClient) if not name.startswith("_")} - fields
+    assert visible == {
         "health", "agents", "act", "action", "restart_ui", "restart_latest",
-    }, "HopClient grew or lost a method; the listener must be updated with it"
+    }, f"HopClient grew or lost a method ({sorted(visible)}); the listener must be updated with it"
 
     recorded = _client_calls()
     assert len(recorded) == 6, f"hop calls {len(recorded)} paths; this row expects six"
