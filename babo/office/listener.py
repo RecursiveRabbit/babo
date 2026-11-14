@@ -26,7 +26,7 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 
 from babo.office.service import ManagerService
 
@@ -46,10 +46,10 @@ class _Handler(BaseHTTPRequestHandler):
     service: ManagerService
     server_version = "office-listener"
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003 - stdlib hook
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib hook name
         # One line per call, at the peer's own address: the log is evidence, and a
         # silent listener is how a seam gets debugged by guesswork.
-        sys.stderr.write("office-listener %s %s\n" % (self.address_string(), fmt % args))
+        sys.stderr.write("office-listener %s %s\n" % (self.address_string(), format % args))
 
     # -- dispatch ---------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 - stdlib hook
@@ -68,10 +68,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not raw:
             return {}
         try:
-            loaded = json.loads(raw.decode("utf-8"))
+            loaded: object = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             return {}
-        return loaded if isinstance(loaded, dict) else {}
+        return cast(dict[str, Any], loaded) if isinstance(loaded, dict) else {}
 
     def _dispatch(self, method: str) -> None:
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
