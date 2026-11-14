@@ -112,9 +112,17 @@ def serve(service: ManagerService, *, bind: str = DEFAULT_BIND, port: int = DEFA
     return ThreadingHTTPServer((bind, port), handler)
 
 
-def _ui_peers_from_env() -> tuple[str, ...]:
-    raw = os.environ.get("BABO_OFFICE_PEERS") or ""
-    return tuple(entry.strip() for entry in raw.split(",") if entry.strip())
+def _declared_sources() -> str:
+    """The door, as the render declares it.
+
+    `BABO_TRUSTED_SOURCES` is the render's own key (service.RENDER_UI_SOURCES);
+    `BABO_OFFICE_PEERS` is kept as a deployment alias for the same input. Neither
+    is an admission policy of its own: both are passed INTO the render, and the
+    render decides what is admissible.
+    """
+    return (os.environ.get(service.RENDER_UI_SOURCES)
+            or os.environ.get("BABO_OFFICE_PEERS")
+            or "")
 
 
 def main() -> int:
@@ -123,13 +131,20 @@ def main() -> int:
 
     bind = os.environ.get("BABO_OFFICE_BIND") or DEFAULT_BIND
     port = int(os.environ.get("BABO_OFFICE_PORT") or DEFAULT_PORT)
-    peers = _ui_peers_from_env()
-    if not peers:
-        sys.stderr.write("office-listener FATAL: BABO_OFFICE_PEERS is unset; no caller is admissible\n")
-        return 2
 
-    service = ManagerService(core=manager_for(None), ui_peers=peers)
-    server = serve(service, bind=bind, port=port)
+    # The render owns this door's addresses, so the production constructor goes
+    # through it. Building ManagerService(ui_peers=...) here would make this the
+    # second source of admission policy — the duplicate the retirement existed to
+    # prevent — and would leave from_render with no production caller to keep it
+    # honest.
+    render = {service.RENDER_UI_SOURCES: _declared_sources()}
+    try:
+        office = ManagerService.from_render(core=manager_for(None), render=render)
+    except service.RenderIncompleteError as exc:
+        sys.stderr.write(f"office-listener FATAL: {exc}\n")
+        return 2
+    peers = office.ui_peers
+    server = serve(office, bind=bind, port=port)
     if bind == DEFAULT_BIND:
         sys.stderr.write(f"office-listener on {bind}:{port} — loopback only; admitted peers: {', '.join(peers)}\n")
     else:
