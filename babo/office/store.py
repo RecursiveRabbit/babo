@@ -75,24 +75,26 @@ class AgentStore:
             agents = self.load()
             raw_previous: object = agents.get(handle)
             previous: dict[str, Any] = cast(dict[str, Any], raw_previous) if isinstance(raw_previous, dict) else {}
-            saved = {
-                "handle": handle,
-                "resident": str(entry.get("resident") or previous.get("resident") or ""),
-                "project": str(entry.get("project") or previous.get("project") or ""),
-                "crew": str(entry.get("crew") or previous.get("crew") or ""),
-                "desired": str(entry.get("desired") or previous.get("desired") or "running"),
-                "labels": dict(entry.get("labels") or previous.get("labels") or {}),
-                "created": str(previous.get("created") or now_iso()),
-                "updated": now_iso(),
-            }
-            # Identity and channel travel with the entry, and are carried through an
-            # upsert that does not mention them. Absence is preserved: a row written
-            # before this existed stays unregistered rather than acquiring a blank
-            # identity it never had.
+            # Merge over what is already there, never rebuild from a field list. A
+            # writer that rebuilds silently deletes every key it does not know
+            # about — identity and channel were deleted that way until this week,
+            # and so would be the next key anyone adds. Only the fields that carry
+            # a default are normalised, and they are read back out of the merge.
+            saved: dict[str, Any] = {**previous, **entry}
+            saved["handle"] = handle
+            saved["resident"] = str(saved.get("resident") or "")
+            saved["project"] = str(saved.get("project") or "")
+            saved["crew"] = str(saved.get("crew") or "")
+            saved["desired"] = str(saved.get("desired") or "running")
+            saved["labels"] = dict(saved.get("labels") or {})
+            saved["created"] = str(saved.get("created") or now_iso())
+            saved["updated"] = now_iso()
             for key in ("identity", "channel"):
-                if key in entry or key in previous:
-                    saved[key] = str(entry.get(key, previous.get(key)) or "")
+                if key in saved:
+                    saved[key] = str(saved[key] or "")
             agents[handle] = saved
+            atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
+        return saved
             atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return saved
 

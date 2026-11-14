@@ -93,3 +93,27 @@ def test_the_runtime_path_never_consults_rails() -> None:
             if needle in text:
                 offences.append(f"{path.relative_to(root)}: {needle}")
     assert not offences, "the office line must not consult Rails at runtime: " + "; ".join(offences)
+
+
+def test_an_unknown_key_survives_an_unrelated_upsert(store: AgentStore) -> None:
+    """The row that fails against a writer that rebuilds from a fixed field list.
+
+    `upsert` used to construct `saved` from a literal set of keys, so any key it
+    did not name was deleted on the next write — identity and channel were, and so
+    would be the next one anyone adds. This writes a key the schema has never heard
+    of and proves the merge carries it. The happy path was never the risk.
+    """
+    _record(store)
+    store.set_identity("crew-1", "archivist", "silas")
+    entry = store.get("crew-1")
+    assert entry is not None
+    entry["last_spawn"] = "2026-11-14T00:00:00+00:00"
+    store.upsert(entry)
+
+    store.set_desired("crew-1", "frozen")      # an unrelated write
+
+    after = store.get("crew-1")
+    assert after is not None
+    assert after["last_spawn"] == "2026-11-14T00:00:00+00:00", "a key the schema does not know was deleted"
+    assert after["identity"] == "archivist" and after["channel"] == "silas"
+    assert after["desired"] == "frozen", "the merge still applies what was asked for"
