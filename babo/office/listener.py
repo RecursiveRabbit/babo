@@ -28,7 +28,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
-from babo.office.service import ManagerService
+from babo.office.service import RENDER_UI_SOURCES, ManagerService, RenderIncompleteError
 
 # Exactly the paths hop calls. The contract test derives its expectations from
 # hop.py itself, so this table cannot quietly diverge from the client.
@@ -120,7 +120,7 @@ def _declared_sources() -> str:
     is an admission policy of its own: both are passed INTO the render, and the
     render decides what is admissible.
     """
-    return (os.environ.get(service.RENDER_UI_SOURCES)
+    return (os.environ.get(RENDER_UI_SOURCES)
             or os.environ.get("BABO_OFFICE_PEERS")
             or "")
 
@@ -137,10 +137,10 @@ def main() -> int:
     # second source of admission policy — the duplicate the retirement existed to
     # prevent — and would leave from_render with no production caller to keep it
     # honest.
-    render = {service.RENDER_UI_SOURCES: _declared_sources()}
+    render = {RENDER_UI_SOURCES: _declared_sources()}
     try:
         office = ManagerService.from_render(core=manager_for(None), render=render)
-    except service.RenderIncompleteError as exc:
+    except RenderIncompleteError as exc:
         sys.stderr.write(f"office-listener FATAL: {exc}\n")
         return 2
     peers = office.ui_peers
