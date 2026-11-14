@@ -47,7 +47,7 @@ def _cmd(image: str) -> list[str] | None:
     return json.loads(done.stdout.strip() or "null")
 
 
-def test_agent_image_cmd_is_gateway_and_app_image_cmd_is_status_UNMET_the_agent_does_not_learn_identity() -> None:
+def test_agent_image_cmd_is_gateway_and_app_cmd_is_status_unmet_the_agent_does_not_learn_identity() -> None:
     """UNMET (identity): this row proves the command, and nothing about who the pod is.
 
     A named absence in the row's own name, because the reader for
