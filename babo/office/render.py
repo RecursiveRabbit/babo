@@ -30,9 +30,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from babo.office import vocabulary
 from babo.office.core import Identity
 from babo.office.runtime import LaunchSpec, Mount
-from babo.office import vocabulary
 
 # The keys this renderer needs, each named as the oracle names it.
 SURFACE_KEYS = (

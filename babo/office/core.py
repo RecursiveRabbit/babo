@@ -685,7 +685,7 @@ class NativeManager:
                 # Named gap, not a silent skip: network.py has not landed.
                 mesh_note = "; mesh peer freeze not wired (network.py not landed)"
             try:
-                self.runtime.remove(handle)
+                self.runtime.remove(self._pod_name(handle))
             except RuntimeUnavailableError as exc:
                 return "failed", f"destroy of {handle} did not remove the pod: {exc}"
             self.store.record_launch(handle, boot_id=self.boot_id,
