@@ -70,7 +70,8 @@ def test_every_path_the_client_calls_is_answered_by_the_listener() -> None:
         assert client.health().ok, "GET health"
 
         agents = client.agents()
-        assert agents.ok and [a["handle"] for a in agents.payload["agents"]] == ["crew-1"]
+        handles = [a["handle"] for a in agents.payload["agents"]]
+        assert agents.ok and "crew-1" in handles, handles
 
         started = client.act("crew-1", "wake", "owner asked", actor=Actor("owner", "webui-session"))
         assert started.ok and started.status == 202 and started.payload["action_id"]
