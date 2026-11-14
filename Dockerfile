@@ -102,8 +102,9 @@ CMD ["gateway"]
 # is mounted read-only by the pod renderer and NOTHING in babo/ reads it — the
 # retired oracle's reader was Rails, from outside the pod. A pod from this tag
 # starts a gateway that knows its config and its workspace and not its identity.
-# The reader is the next change; the row beside this file asserts the CMD and
-# carries this UNMET in its own name.
+# The reader is the relay's job. scripts/verify_agent_image_cmd.sh checks the two
+# commands on a machine with podman — a script, not a CI row, because a row that
+# can never run is furniture with a number attached.
 
 FROM base AS app
 USER root
