@@ -157,6 +157,14 @@ class LaunchSpec:
     cap_drop: tuple[str, ...] = ()
     labels: dict[str, str] = field(default_factory=dict)
     command: tuple[str, ...] = ()
+    hostname: str = ""
+    memory: str = ""
+    cpus: str = ""
+    # The oracle sets these three and the spec could not express them, so a
+    # renderer written against the old shape would have dropped them silently —
+    # the same class as the wg0 template that dropped [Peer]. `memory` and
+    # `cpus` are capacity policy the Manager already enforces at Spawner.resolve;
+    # `hostname` is how the Router addresses the pod.
 
 
 class AgentControl(Protocol):
@@ -263,6 +271,12 @@ class PodmanRuntime:
     # -- writes ---------------------------------------------------------
     def run(self, spec: LaunchSpec) -> ContainerFacts:
         args = ["run", "-d", "--name", spec.name]
+        if spec.hostname:
+            args += ["--hostname", spec.hostname]
+        if spec.memory:
+            args += ["--memory", spec.memory]
+        if spec.cpus:
+            args += ["--cpus", spec.cpus]
         for key, value in spec.env.items():
             args += ["-e", f"{key}={value}"]
         for mount in spec.mounts:
