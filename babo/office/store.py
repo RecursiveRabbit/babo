@@ -75,16 +75,23 @@ class AgentStore:
             agents = self.load()
             raw_previous: object = agents.get(handle)
             previous: dict[str, Any] = cast(dict[str, Any], raw_previous) if isinstance(raw_previous, dict) else {}
-            saved = {
-                "handle": handle,
-                "resident": str(entry.get("resident") or previous.get("resident") or ""),
-                "project": str(entry.get("project") or previous.get("project") or ""),
-                "crew": str(entry.get("crew") or previous.get("crew") or ""),
-                "desired": str(entry.get("desired") or previous.get("desired") or "running"),
-                "labels": dict(entry.get("labels") or previous.get("labels") or {}),
-                "created": str(previous.get("created") or now_iso()),
-                "updated": now_iso(),
-            }
+            # Merge over what is already there, never rebuild from a field list. A
+            # writer that rebuilds silently deletes every key it does not know
+            # about — identity and channel were deleted that way until this week,
+            # and so would be the next key anyone adds. Only the fields that carry
+            # a default are normalised, and they are read back out of the merge.
+            saved: dict[str, Any] = {**previous, **entry}
+            saved["handle"] = handle
+            saved["resident"] = str(saved.get("resident") or "")
+            saved["project"] = str(saved.get("project") or "")
+            saved["crew"] = str(saved.get("crew") or "")
+            saved["desired"] = str(saved.get("desired") or "running")
+            saved["labels"] = dict(saved.get("labels") or {})
+            saved["created"] = str(saved.get("created") or now_iso())
+            saved["updated"] = now_iso()
+            for key in ("identity", "channel"):
+                if key in saved:
+                    saved[key] = str(saved[key] or "")
             agents[handle] = saved
             atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return saved
@@ -94,7 +101,6 @@ class AgentStore:
             agents = self.load()
             if agents.pop(_handle(handle), None) is None:
                 return False
-            atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return True
 
     # -- checked changes --------------------------------------------------
@@ -123,6 +129,27 @@ class AgentStore:
             raise BatonError(f"'{handle}' isn't recorded here, so it has no desired state to change")
         entry["desired"] = desired
         self.upsert(entry)
+
+    def set_identity(self, handle: str, identity: str, channel: str = "") -> dict[str, Any]:
+        """Record who this handle is, and on which channel it runs.
+
+        The writer the core has been missing: `spawn` refuses without an identity
+        ("no identity/channel recorded for {handle}"), and until now nothing in the
+        office line wrote one. Both keys are written, and `channel` may be empty —
+        that is the singleton case, and it is a fact rather than an absence.
+
+        The handle must already be recorded: registration is `record_agent`, and
+        this attaches to it rather than inventing a second way to make an agent.
+        """
+        entry = self.get(handle)
+        if entry is None:
+            raise BatonError(f"'{handle}' isn't recorded here, so there is no agent to name")
+        clean_identity = identity.strip()
+        if not clean_identity:
+            raise BatonError("an agent's identity cannot be empty; it is the name the Router and the store key on")
+        entry["identity"] = clean_identity
+        entry["channel"] = channel.strip()
+        return self.upsert(entry)
 
 
 class CrewStore:
