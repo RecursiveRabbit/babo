@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from babo.office.api import ACTIONS, ActionRecord
-from babo.office.vocabulary import instance_name
 from babo.office.audit import Store
 from babo.office.core import (
     HANDLE_LABEL,
@@ -34,6 +33,7 @@ from babo.office.runtime import (
     RuntimeUnavailableError,
     RuntimeVerdictError,
 )
+from babo.office.vocabulary import instance_name
 from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
