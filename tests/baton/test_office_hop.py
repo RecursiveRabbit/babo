@@ -11,6 +11,7 @@ it reach `succeeded` (H-6).
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from babo.office import hop, service
 from babo.office.actors import Actor
@@ -233,3 +234,67 @@ def test_the_agent_path_does_not_carry_the_pod_verb() -> None:
                                    "actor": "host_operator", "actor_source": "host-wg"})
     assert status == 403 and "host operator's verb" in payload["detail"]
     assert not core.audit, "a closed door leaves no row"
+
+
+# -- what the core does when the Manager asks --------------------------------
+# These four rows used to live in tests/baton/test_office_api.py and were reached
+# through the UI route, which called the core in-process. The UI no longer executes
+# lifecycle, so the same four statements are asserted where they now happen: against
+# the service the Manager will serve, and against the core under it. Same claims.
+def _settle(svc: ManagerService, action_id: str) -> dict[str, Any]:
+    for _ in range(200):
+        status, payload = svc.action(UI, action_id)
+        if status == 200 and payload.get("state") in ("succeeded", "failed", "refused", "timeout"):
+            return payload
+    raise AssertionError("the action never settled")
+
+
+def _ask(svc: ManagerService, handle: str, action: str) -> dict[str, Any]:
+    status, started = svc.act(UI, {"handle": handle, "action": action, "reason": "owner asked",
+                                   "actor": "owner", "actor_source": "webui-session"})
+    assert status == 202 and started["action_id"], started
+    return _settle(svc, started["action_id"])
+
+
+def test_a_wake_is_pending_then_the_managers_answer_is_succeeded() -> None:
+    core = _core()
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    status, started = svc.act(UI, {"handle": "crew-1", "action": "wake", "reason": "owner asked",
+                                   "actor": "owner", "actor_source": "webui-session"})
+    assert status == 202 and started["action_id"]
+    op = _settle(svc, started["action_id"])
+    assert op["state"] == "succeeded"
+    assert core.audit[-1] == ("crew-1", "wake", "owner", "webui-session")
+
+
+def test_freezing_says_released_not_paused_and_not_saved() -> None:
+    core = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    op = _ask(svc, "crew-1", "freeze")
+    assert op["state"] == "succeeded" and "pod released" in op["detail"] and "paused" not in op["detail"]
+
+
+def test_a_failed_action_says_why_and_leaves_the_record_alone() -> None:
+    core = _core(fail={"wake"})
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    op = _ask(svc, "crew-1", "wake")
+    assert op["state"] == "failed" and "failed at the runtime" in op["detail"]
+    assert core.agents_by_handle["crew-1"].state == "frozen", "a failed action must not move the record"
+
+
+def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page() -> None:
+    """One refusal, one place: the Manager asks, the core declines by name (L-02/L-03)."""
+    core = _core()
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    op = _ask(svc, "ghost", "wake")
+    assert op["state"] == "refused" and "record it first" in op["detail"]
+
+
+def test_the_other_three_verbs_ride_the_same_path_and_report_the_cores_word() -> None:
+    """spawn/rescue/destroy ride the same pending→verdict path; no friendlier synonyms."""
+    core = _core()
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    for verb in ("spawn", "rescue", "destroy"):
+        op = _ask(svc, "crew-1", verb)
+        assert op["state"] == "refused", verb
+        assert verb in op["detail"], verb
