@@ -13,6 +13,7 @@ answer on its own.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -123,6 +124,51 @@ def _text(payload: dict[str, Any], key: str, limit: int = 200) -> str:
     return value.strip()
 
 
+# The UI does not execute lifecycle. It asks the Manager, and reports what the
+# Manager said. The lifecycle call used to run the action in this process, which
+# worked only while the UI was also the Manager — the hollow shell D-12 removes. A
+# bypass that still works is the one nobody notices later, because it looks like
+# success, so it is gone rather than demoted: there is no in-process fallback when
+# the hop fails.
+#
+# hop.py is the contract of record. Five calls, one timeout, no retries, and the
+# Manager's words are the verdict. This wrapper adds exactly one thing hop does not
+# have: the name of the hole when there is no Manager to ask.
+def _hop_action(handle: str, verb: str, reason: str, action_id: str | None) -> Response:
+    from babo.office.actors import operator_actor
+    from babo.office.hop import HopClient
+
+    base = (os.environ.get("BABO_MANAGER_URL") or "").strip()
+    if not base:
+        # A named absence, not a quiet success and not a 500. Until the Manager's
+        # listener lands there is nowhere to send this, and the page says so.
+        return http_json_response(
+            {
+                "state": "unavailable",
+                "said": ("no Manager is configured (BABO_MANAGER_URL is unset); lifecycle "
+                         "actions are unavailable until the Manager's listener lands"),
+            },
+            status=503,
+        )
+
+    # The actor is the authenticated session, derived here. The request body never
+    # supplies it: a client that names itself is not evidence.
+    result = HopClient(base_url=base).act(handle, verb, reason,
+                                          actor=operator_actor(), action_id=action_id)
+    if result.ok:
+        # pending / running / the closed terminal set, untouched. The Manager's
+        # words are the verdict; this route adds no state of its own.
+        return http_json_response(result.payload, status=result.status or 202)
+    if result.status == 0:
+        # Nothing answered. Not a refusal — an absence, and a different word.
+        return http_json_response({"state": "unavailable", "said": result.said}, status=503)
+    if not result.payload:
+        # Something answered, but not with JSON: the page cannot read a verdict from it.
+        return http_json_response({"state": "unknown", "said": result.said}, status=502)
+    # A JSON answer that is not 200/202 is the Manager refusing, in its own words.
+    return http_json_response(result.payload, status=result.status)
+
+
 class OfficeRoutes:
     def __init__(self, *, authorized: Callable[[WsRequest], bool],
                  payload: Callable[[WsRequest], dict[str, Any] | None]) -> None:
@@ -174,16 +220,7 @@ class OfficeRoutes:
             reason = str(body.get("reason") or "")[:400]
             replay = body.get("action_id")
             action_id = str(replay)[:64] if isinstance(replay, str) and replay.strip() else None
-            # The record read is small; keeping it on this loop lets the action's
-            # follow-up task be created here, with the Manager call in a thread.
-            from babo.office.actors import operator_actor
-
-            # The actor is the authenticated operator session, obtained here — the
-            # request body never supplies it (a client that names itself is not
-            # evidence), and there is no constant default to fall back on.
-            op = control.begin(_town(), _manager(), _ops(), handle, verb, reason,
-                               actor=operator_actor(), action_id=action_id)
-            return http_json_response({"state": "pending", "op": op.overview()}, status=202)
+            return await asyncio.to_thread(_hop_action, handle, verb, reason, action_id)
         return http_error(404, "No such office route")
 
     def _body(self, request: WsRequest) -> dict[str, Any]:

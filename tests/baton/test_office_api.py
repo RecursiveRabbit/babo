@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,6 @@ from websockets.http11 import Request as WsRequest
 
 from babo.baton import projects as project_board
 from babo.baton.town import Town
-from babo.office.model import AgentObserved
 from babo.webui import office_api
 from baton.office_fakes import FakeCore
 
@@ -59,15 +57,6 @@ def _project(town: Town, title: str = "Control plane") -> str:
     return project_board.new_project(town, "mayor", title).slug
 
 
-async def _settle(routes: office_api.OfficeRoutes, op_id: str) -> dict[str, Any]:
-    for _ in range(200):
-        _status, op = await _call(routes, f"/api/office/ops/{op_id}")
-        if op["state"] != "pending" and op["state"] != "running":
-            return op
-        await asyncio.sleep(0.01)
-    raise AssertionError("the action never settled")
-
-
 async def test_the_view_joins_records_and_shows_what_is_missing(town: Town, index_path: Path,
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
     slug = _project(town)
@@ -83,64 +72,6 @@ async def test_the_view_joins_records_and_shows_what_is_missing(town: Town, inde
     assert agent["status"] == "missing" and agent["desired"] == "running"
     assert view["missing"] == ["crew-1"]
     assert next(p for p in view["projects"] if p["slug"] == slug)["agents"] == ["crew-1"]
-
-
-async def test_waking_an_agent_is_pending_then_the_managers_answer(town: Town, index_path: Path,
-                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
-    slug = _project(town)
-    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")})
-    routes = _routes(town, index_path, monkeypatch, manager=manager)
-    await _call(routes, "/api/office/agents/record",
-                {"handle": "crew-1", "resident": "archivist", "project": slug, "desired": "frozen"})
-
-    status, started = await _call(routes, "/api/office/agents/wake", {"handle": "crew-1"})
-    assert status == 202 and started["state"] == "pending"
-    op = await _settle(routes, started["op"]["id"])
-    assert op["state"] == "succeeded"
-    assert op["observed"]["state"] == "alive"
-
-    _status, view = await _call(routes, "/api/office")
-    agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
-    assert agent["status"] == "running" and agent["desired"] == "running"
-
-
-async def test_freezing_says_released_not_paused_and_not_saved(town: Town, index_path: Path,
-                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    slug = _project(town)
-    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
-    routes = _routes(town, index_path, monkeypatch, manager=manager)
-    await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
-    _status, started = await _call(routes, "/api/office/agents/freeze", {"handle": "crew-1"})
-    op = await _settle(routes, started["op"]["id"])
-    assert op["state"] == "succeeded" and "pod released" in op["said"] and "paused" not in op["said"]
-    _status, view = await _call(routes, "/api/office")
-    agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
-    assert agent["status"] == "frozen"
-
-
-async def test_a_failed_action_says_why_and_leaves_the_record_alone(town: Town, index_path: Path,
-                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    slug = _project(town)
-    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")}, fail={"wake"})
-    routes = _routes(town, index_path, monkeypatch, manager=manager)
-    await _call(routes, "/api/office/agents/record",
-                {"handle": "crew-1", "resident": "archivist", "project": slug, "desired": "frozen"})
-    _status, started = await _call(routes, "/api/office/agents/wake", {"handle": "crew-1"})
-    op = await _settle(routes, started["op"]["id"])
-    assert op["state"] == "failed" and "failed at the runtime" in op["said"]
-    _status, view = await _call(routes, "/api/office")
-    agent = next(a for a in view["agents"] if a["handle"] == "crew-1")
-    assert agent["desired"] == "frozen" and agent["status"] == "frozen"
-
-
-async def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page(town: Town, index_path: Path,
-                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
-    """One refusal, one place: the page asks, the core declines by name (L-02/L-03)."""
-    routes = _routes(town, index_path, monkeypatch)
-    status, started = await _call(routes, "/api/office/agents/wake", {"handle": "ghost"})
-    assert status == 202
-    op = await _settle(routes, started["op"]["id"])
-    assert op["state"] == "refused" and "record it first" in op["said"]
 
 
 async def test_an_unreachable_manager_is_shown_as_unknown_not_running(town: Town, index_path: Path,
@@ -210,16 +141,19 @@ async def test_before_the_core_lands_the_office_says_so(town: Town, index_path: 
     assert agent["said"] == view["manager"]["said"]
 
 
-async def test_the_other_three_verbs_are_reachable_and_report_the_cores_word(town: Town, index_path: Path,
-                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    """spawn/rescue/destroy ride the same pending→verdict path; no friendlier synonyms."""
-    slug = _project(town)
-    manager = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="frozen")})
-    routes = _routes(town, index_path, monkeypatch, manager=manager)
-    await _call(routes, "/api/office/agents/record", {"handle": "crew-1", "resident": "archivist", "project": slug})
-    for verb in ("spawn", "rescue", "destroy"):
-        status, started = await _call(routes, f"/api/office/agents/{verb}", {"handle": "crew-1"})
-        assert status == 202, verb
-        op = await _settle(routes, started["op"]["id"])
-        assert op["state"] == "refused", verb
-        assert verb in op["said"]
+async def test_a_lifecycle_action_without_a_manager_says_unavailable_and_touches_nothing(
+        town: Town, index_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hole, named in the product: no Manager, no ring, and nothing executed here.
+
+    This is the HTTP-shaped half of `test_the_other_three_verbs_...`, which moved to
+    tests/baton/test_office_hop.py when the UI stopped executing lifecycle. The claim
+    here is only what a route can claim: the page is told `unavailable` by name, and
+    the core in this process was never asked.
+    """
+    monkeypatch.delenv("BABO_MANAGER_URL", raising=False)
+    routes = _routes(town, index_path, monkeypatch)
+    status, body = await _call(routes, "/api/office/agents/wake", {"handle": "crew-1", "reason": "try"})
+    assert status == 503
+    assert body["state"] == "unavailable"
+    assert "no Manager is configured" in body["said"]
+    assert routes.manager.audit == [], "an unavailable Manager must not fall back to executing here"
