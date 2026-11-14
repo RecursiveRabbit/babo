@@ -747,11 +747,17 @@ class NativeManager:
         deadline, so `timeout` means the deadline passed with no answer, not
         that the first read failed (F-8's clock note).
         """
+        # Resolve the name BEFORE the clock starts. `_pod_name` reads the agent
+        # store — a file read and a parse — and that is our bookkeeping, not the
+        # engine's response. The deadline exists to bound how long podman takes;
+        # letting a lookup inside it shorten a resident's freeze budget is the
+        # lookup leaking into a verdict.
+        pod = self._pod_name(handle)
         deadline = _parse(self.clock()) + timedelta(seconds=self.deadline)
         unreadable = ""
         while True:
             try:
-                facts = self.runtime.inspect_container(self._pod_name(handle))
+                facts = self.runtime.inspect_container(pod)
             except RuntimeUnavailableError as exc:
                 unreadable = str(exc)
             else:
