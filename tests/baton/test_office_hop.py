@@ -20,6 +20,7 @@ from babo.office.service import ManagerService
 from baton.office_fakes import FakeCore
 
 UI = "10.0.0.11"
+OP = "10.0.0.2"
 
 
 def _core(**kwargs: object) -> FakeCore:
