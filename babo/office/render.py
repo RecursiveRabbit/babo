@@ -47,7 +47,7 @@ SPAWN_DESTINATION = "/run/secrets/spawn.json"
 CLAUDE_DESTINATION = "/run/secrets/claude"
 
 
-class RenderIncomplete(ValueError):
+class RenderIncompleteError(ValueError):
     """A surface value the render cannot do without, named rather than defaulted."""
 
 
@@ -67,7 +67,7 @@ def surface_from(values: Mapping[str, str]) -> Surface:
     """A surface from configuration, refusing by name when a key is absent."""
     missing = [key for key in SURFACE_KEYS if not str(values.get(key) or "").strip()]
     if missing:
-        raise RenderIncomplete(
+        raise RenderIncompleteError(
             "the pod render cannot run without: "
             + ", ".join(missing)
             + " — each is a value the retired manager's scripts set, and none has a default here"

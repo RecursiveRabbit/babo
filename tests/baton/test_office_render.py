@@ -67,11 +67,11 @@ def test_the_two_absences_are_pinned_because_they_are_load_bearing() -> None:
 def test_a_missing_surface_value_is_refused_by_name_not_defaulted() -> None:
     for key in render.SURFACE_KEYS:
         values = {k: v for k, v in SURFACE.items() if k != key}
-        with pytest.raises(render.RenderIncomplete) as caught:
+        with pytest.raises(render.RenderIncompleteError) as caught:
             render.surface_from(values)
         assert key in str(caught.value), f"{key} must be named, not defaulted"
 
-    with pytest.raises(render.RenderIncomplete) as caught:
+    with pytest.raises(render.RenderIncompleteError) as caught:
         render.surface_from({**SURFACE, "container_memory": "   "})
     assert "container_memory" in str(caught.value), "blank is absent, not a value"
 
