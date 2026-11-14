@@ -268,17 +268,17 @@ def test_a_wake_is_pending_then_the_managers_answer_is_succeeded() -> None:
 
 
 def test_freezing_says_released_not_paused_and_not_saved() -> None:
-    core = _core(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
+    core = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     op = _ask(svc, "crew-1", "freeze")
-    assert op["state"] == "succeeded" and "pod released" in op["said"] and "paused" not in op["said"]
+    assert op["state"] == "succeeded" and "pod released" in op["detail"] and "paused" not in op["detail"]
 
 
 def test_a_failed_action_says_why_and_leaves_the_record_alone() -> None:
     core = _core(fail={"wake"})
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     op = _ask(svc, "crew-1", "wake")
-    assert op["state"] == "failed" and "failed at the runtime" in op["said"]
+    assert op["state"] == "failed" and "failed at the runtime" in op["detail"]
     assert core.agents_by_handle["crew-1"].state == "frozen", "a failed action must not move the record"
 
 
@@ -287,7 +287,7 @@ def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page() -> None:
     core = _core()
     svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
     op = _ask(svc, "ghost", "wake")
-    assert op["state"] == "refused" and "record it first" in op["said"]
+    assert op["state"] == "refused" and "record it first" in op["detail"]
 
 
 def test_the_other_three_verbs_ride_the_same_path_and_report_the_cores_word() -> None:
@@ -297,4 +297,4 @@ def test_the_other_three_verbs_ride_the_same_path_and_report_the_cores_word() ->
     for verb in ("spawn", "rescue", "destroy"):
         op = _ask(svc, "crew-1", verb)
         assert op["state"] == "refused", verb
-        assert verb in op["said"], verb
+        assert verb in op["detail"], verb
