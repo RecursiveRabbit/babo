@@ -9,7 +9,7 @@ COPY packages/client-events/ /app/packages/client-events/
 COPY babo/channels/ /app/babo/channels/
 RUN mkdir -p /app/babo/web && npm run build
 
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS base
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap openssh-client libmagic1 && \
@@ -76,5 +76,39 @@ ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
 # Gateway health endpoint and optional WebUI/WebSocket channel ports
 EXPOSE 18790 8765
 
+# --- two roles, one image -----------------------------------------------------
+#
+# The app image runs `status`; an agent pod has to start the thing that runs the
+# loop, which is `babo gateway` (gateway_runtime.py builds the AgentLoop). The
+# difference is the command and nothing else, so it is a build TARGET and a tag —
+# not a second Dockerfile. Two Dockerfiles for one container drift apart the first
+# time a dependency changes; a tag is a decision about command only.
+#
+#   docker build --target app   -t babo        .     # CMD ["status"]  (the default)
+#   docker build --target agent -t babo-agent  .     # CMD ["gateway"]
+#
+# The Office's pod renderer names an image (`Surface.agent_image` was config in the
+# retired oracle: the product never shipped an agent image, it named one a deployer
+# supplied). The agent target is what lets the product make its own agent.
+FROM base AS agent
+USER root
+ENV HOME=/home/babo
+ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
+EXPOSE 18790 8765
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["gateway"]
+# UNMET, and it belongs in the artefact rather than in a pull-request note: the
+# agent inside this image does not yet learn who it is. `/run/secrets/spawn.json`
+# is mounted read-only by the pod renderer and NOTHING in babo/ reads it — the
+# retired oracle's reader was Rails, from outside the pod. A pod from this tag
+# starts a gateway that knows its config and its workspace and not its identity.
+# The reader is the next change; the row beside this file asserts the CMD and
+# carries this UNMET in its own name.
+
+FROM base AS app
+USER root
+ENV HOME=/home/babo
+ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
+EXPOSE 18790 8765
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["status"]
