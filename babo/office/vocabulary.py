@@ -74,3 +74,16 @@ EVENT_TABLE: Mapping[tuple[str, str], str] = MappingProxyType({
 # set, because it is not a word in the vocabulary but the evidence that a cell
 # was missing.
 ACTION_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(EVENT_TABLE.values()))
+
+
+def instance_name(identity: str, channel: str) -> str:
+    """The pod's name — one producer, so there is no second derivation to disagree.
+
+    `spawner.rb:202-205`: the identity if the configuration is singleton, else
+    `identity-channel`. The core resolves a handle through this before it inspects
+    a pod, because the renderer names pods by it; two derivations of one name is
+    how `nothing to destroy: no pod for crew-1` happens while the pod is up.
+    """
+    handle = identity.strip()
+    channel = channel.strip()
+    return handle if not channel else f"{handle}-{channel}"

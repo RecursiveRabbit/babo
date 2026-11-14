@@ -32,6 +32,7 @@ from dataclasses import dataclass
 
 from babo.office.core import Identity
 from babo.office.runtime import LaunchSpec, Mount
+from babo.office import vocabulary
 
 # The keys this renderer needs, each named as the oracle names it.
 SURFACE_KEYS = (
@@ -84,10 +85,13 @@ def surface_from(values: Mapping[str, str]) -> Surface:
 
 def instance_name(identity: Identity) -> str:
     """The pod's name: `spawner.rb:202-205`, with the singleton case expressed as
-    an absent channel rather than as a second flag to keep in step."""
-    handle = identity.identity.strip()
-    channel = identity.channel.strip()
-    return handle if not channel else f"{handle}-{channel}"
+    an absent channel rather than as a second flag to keep in step.
+
+    The rule itself lives in `vocabulary.instance_name` so the core can resolve a
+    handle through the same producer before it inspects a pod. Two derivations of
+    one name is how `nothing to destroy` happens while the pod is running.
+    """
+    return vocabulary.instance_name(identity.identity, identity.channel)
 
 
 def spec_for(handle: str, identity: Identity, *, surface: Surface) -> LaunchSpec:
