@@ -83,7 +83,7 @@ def test_the_client_refuses_the_pod_verb_on_the_agent_path_and_from_a_session() 
     assert via_act.unavailable and "agent path" in via_act.said
 
     from_a_session = client.restart_ui("r", actor=Actor("owner", "webui-session"))
-    assert from_a_session.unavailable and "is not a host_operator" in from_a_session.said
+    assert from_a_session.unavailable and "provenance is not the host operator" in from_a_session.said
     assert not calls, "neither refusal left the pod"
 
     derived = client.restart_ui("invalidate sessions", actor=hop.operator_from_session("evans", "host-wg"))
@@ -198,7 +198,7 @@ def test_restart_ui_admits_one_door_and_exactly_one_class() -> None:
                                              "actor_source": caught})
         assert status in (400, 403)
         if status == 403:
-            assert "is not a host_operator" in payload["detail"], payload
+            assert "provenance is not the host operator" in payload["detail"], payload
             assert repr(caught) in payload["detail"], "the refusal names the class it caught"
         else:
             assert "missing reason, actor or actor_source" in payload["detail"]
@@ -339,3 +339,49 @@ def test_the_other_three_verbs_ride_the_same_path_and_report_the_cores_word() ->
         op = _ask(svc, "crew-1", verb)
         assert op["state"] == "refused", verb
         assert verb in op["detail"], verb
+
+
+# -- the predicate, in both directions ---------------------------------------
+# The desk ruled source over name: a name is a claim, a source is a derivation
+# from the transport, and the office contract already says operator authority
+# arrives from the host-WG session. So both directions are rows, not a preference:
+# an actor whose SOURCE is right and whose NAME is wrong is admitted, and an actor
+# whose NAME is right and whose SOURCE is not is refused by the word it carried.
+def test_the_client_admits_by_source_and_refuses_by_name() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def transport(method: str, url: str, body: object, timeout_s: float) -> tuple[int, str]:
+        calls.append((method, url))
+        return 202, json.dumps({"action_id": "restart-1"})
+
+    client = hop.HopClient("http://manager.invalid:8844", transport=transport)
+
+    # source right, name wrong -> admitted; the name travels, the source decides
+    admitted = client.restart_ui("leaked", actor=Actor("not-the-named-operator", "host-wg"))
+    assert admitted.ok and calls, "the door opened for the right provenance, whatever it called itself"
+
+    calls.clear()
+    # name right, source wrong -> refused, and the refusal names what it caught
+    refused = client.restart_ui("leaked", actor=Actor("host_operator", "webui-session"))
+    assert refused.unavailable
+    assert "provenance is not the host operator" in refused.said
+    assert repr("webui-session") in refused.said, "the refusal names the source it caught"
+    assert not calls, "a refusal never reaches the wire"
+
+
+def test_the_manager_admits_by_source_and_refuses_by_name() -> None:
+    core = _core()
+    core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
+    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+
+    # source right, name wrong
+    status, _payload = svc.restart_ui(UI, {"reason": "leaked", "actor": "somebody",
+                                           "actor_source": "host-wg", "action_id": "restart-2"})
+    assert status == 202
+
+    # name right, source wrong
+    status, payload = svc.restart_ui(UI, {"reason": "leaked", "actor": "host_operator",
+                                          "actor_source": "webui-session"})
+    assert status == 403
+    assert "provenance is not the host operator" in payload["detail"]
+    assert repr("webui-session") in payload["detail"]

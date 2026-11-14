@@ -126,10 +126,11 @@ class HopClient:
         that made this call, so this client will not be alive to see a verdict
         (H-6). A `succeeded` here would be a lie told by a dead process.
         """
-        if actor.name != OPERATOR_ACTOR:
-            return HopResult(ok=False, said=(f"the actor is not a {OPERATOR_ACTOR} (caught {actor.name!r}); "
-                                             "the operator is derived from the authenticated host-WG "
-                                             f"session ({OPERATOR_SOURCE!r}), never supplied by the page"))
+        if actor.source != OPERATOR_SOURCE:
+            return HopResult(ok=False, said=(f"the actor's provenance is not the host operator "
+                                             f"(caught {actor.source!r}); the operator is derived from "
+                                             "the authenticated host-WG session and never supplied "
+                                             "by the page"))
         body: dict[str, Any] = {"reason": reason, "actor": actor.name, "actor_source": actor.source}
         if action_id:
             body["action_id"] = action_id

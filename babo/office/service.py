@@ -309,12 +309,12 @@ class ManagerService:
         replay = body.get("action_id")
         if not reason or not actor or not actor_source:
             return 400, {"detail": "missing reason, actor or actor_source"}
-        if actor != OPERATOR_ACTOR:
-            # The allow-list of exactly one, and the refusal names the class it
-            # caught (soro's §8). `actor_source` says which door the claim came
-            # through; it is not the authority, and neither is the peer address.
-            return 403, {"detail": (f"the actor is not a {OPERATOR_ACTOR} (caught {actor!r}); "
-                                    f"{OPERATOR_ACTIONS[0]} carries exactly one class")}
+        if actor_source != OPERATOR_SOURCE:
+            # A name without provenance is a string that satisfied a check, not an
+            # identity (F-7): the door's word is the class, and the name rides with
+            # it. The refusal names the class it caught.
+            return 403, {"detail": (f"the actor's provenance is not the host operator (caught {actor_source!r}); "
+                                    f"{OPERATOR_ACTIONS[0]} admits {OPERATOR_SOURCE!r} only")}
         try:
             action_id = self.core.act(UI_POD, "restart-ui", reason, actor=actor, actor_source=actor_source,
                                       action_id=str(replay) if isinstance(replay, str) and replay else None)
