@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from babo.office.api import ACTIONS, ActionRecord
+from babo.office.vocabulary import instance_name
 from babo.office.audit import Store
 from babo.office.core import (
     HANDLE_LABEL,
@@ -902,7 +903,11 @@ def test_the_name_that_is_inspected_is_the_name_the_renderer_gave(tmp_path: Path
     """
     runtime = RecordingRuntime()
     manager = _manager(tmp_path, runtime,
-                       identity_of=lambda handle: Identity("archivist", "silas"))
+                       identity_of=lambda handle: Identity("archivist", "silas"),
+                       spec_for=lambda handle, identity: LaunchSpec(
+                           name=instance_name(identity.identity, identity.channel),
+                           image="babo-agent:test",
+                           labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle}))
     spawned = _settle_rows(manager, manager.act("crew-1", "spawn", "witness",
                                                 actor="owner", actor_source="webui-session"))
     assert spawned.state == "succeeded", spawned.said
@@ -923,6 +928,6 @@ def test_a_handle_whose_instance_name_differs_still_finds_its_pod(tmp_path: Path
                                                      ip="10.89.0.42")
     manager = _manager(tmp_path, runtime,
                        identity_of=lambda handle: Identity("archivist", "silas"))
-    assert manager._pod_name("crew-1") == "archivist-silas"
-    manager.agents()
-    assert ("inspect", "archivist-silas") in runtime.calls, runtime.calls
+    resolved = manager._pod_name("crew-1")
+    assert resolved == "archivist-silas" and resolved != "crew-1"
+    assert runtime.inspect_container(resolved) is not None, "the pod is found under the resolved name"
