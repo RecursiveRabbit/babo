@@ -6,6 +6,7 @@ served proof; the runtime is a recording double.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -32,6 +33,7 @@ from babo.office.runtime import (
     RuntimeUnavailableError,
     RuntimeVerdictError,
 )
+from babo.office.vocabulary import instance_name
 from baton.office_core_fakes import RecordingControl, RecordingRuntime, StubbornControl
 
 NOW = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731 - a clock, not a constant
@@ -44,7 +46,11 @@ def _ledger(tmp_path: Path) -> CredentialLedger:
 
 
 def _manager(tmp_path: Path, runtime: RecordingRuntime, **kw) -> NativeManager:
-    kw.setdefault("identity_of", lambda handle: Identity("kimi", "project-x"))
+    # The pod's name comes from the identity (spawner.rb:202-205), and the core now
+    # resolves every inspection through it. A channel-less identity keeps the name
+    # equal to the handle for these rows; the pod-name rows below use a channel so
+    # the two differ, which is the case that used to look like absence.
+    kw.setdefault("identity_of", lambda handle: Identity(handle, ""))
     kw.setdefault(
         "spec_for",
         lambda handle, identity: LaunchSpec(
@@ -876,3 +882,52 @@ def test_the_restart_read_renders_the_house_zone_like_the_single_row_read(
                                         actor_source="terminal"))
     payload = ManagerService._row(manager.store.get_action(record.id))
     assert payload["created_at"] == record.created_at
+
+# -- one name, one producer ---------------------------------------------------
+def _settle_rows(manager, action_id):
+    for _ in range(200):
+        row = manager.action(action_id)
+        if row.state in ("succeeded", "failed", "refused", "timeout"):
+            return row
+        time.sleep(0.01)
+    raise AssertionError("the action never settled")
+
+
+def test_the_name_that_is_inspected_is_the_name_the_renderer_gave(tmp_path: Path) -> None:
+    """spawn then destroy, same agent, no refusal.
+
+    The pod is named by identity (`archivist-silas`); the handle is `crew-1`. Before
+    this the core inspected `crew-1` on every later verb, so destroy answered
+    "nothing to destroy: no pod for crew-1" while the pod was running — a second
+    spelling of the name, reported as absence.
+    """
+    runtime = RecordingRuntime()
+    manager = _manager(tmp_path, runtime,
+                       identity_of=lambda handle: Identity("archivist", "silas"),
+                       spec_for=lambda handle, identity: LaunchSpec(
+                           name=instance_name(identity.identity, identity.channel),
+                           image="babo-agent:test",
+                           labels={MANAGED_LABEL: "true", HANDLE_LABEL: handle}))
+    spawned = _settle_rows(manager, manager.act("crew-1", "spawn", "witness",
+                                                actor="owner", actor_source="webui-session"))
+    assert spawned.state == "succeeded", spawned.said
+    assert ("run", "archivist-silas") in runtime.calls, runtime.calls
+    assert not [1 for op, name in runtime.calls if op == "inspect" and name == "crew-1"], \
+        "the core must not look under the handle"
+
+    destroyed = _settle_rows(manager, manager.act("crew-1", "destroy", "done",
+                                                  actor="owner", actor_source="webui-session"))
+    assert destroyed.state == "succeeded", destroyed.said
+    assert ("remove", "archivist-silas") in runtime.calls, runtime.calls
+
+
+def test_a_handle_whose_instance_name_differs_still_finds_its_pod(tmp_path: Path) -> None:
+    """The bug, stated as one assertion: the handle and the pod's name are one rule."""
+    runtime = RecordingRuntime()
+    runtime.facts["archivist-silas"] = ContainerFacts(name="archivist-silas", state="running",
+                                                     ip="10.89.0.42")
+    manager = _manager(tmp_path, runtime,
+                       identity_of=lambda handle: Identity("archivist", "silas"))
+    resolved = manager._pod_name("crew-1")
+    assert resolved == "archivist-silas" and resolved != "crew-1"
+    assert runtime.inspect_container(resolved) is not None, "the pod is found under the resolved name"

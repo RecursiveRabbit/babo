@@ -66,7 +66,7 @@ from babo.office.runtime import (
     RuntimeVerdictError,
     UnwiredAgentControl,
 )
-from babo.office.vocabulary import EVENT_FALLBACK, EVENT_TABLE
+from babo.office.vocabulary import EVENT_FALLBACK, EVENT_TABLE, instance_name
 
 _LOG = logging.getLogger(__name__)
 
@@ -272,6 +272,23 @@ class NativeManager:
         self._mesh_freeze = mesh_freeze
         self._sleep = sleep
 
+    def _pod_name(self, handle: str) -> str:
+        """The name the renderer gave this handle's pod — one derivation, called here.
+
+        A pod is named `identity` or `identity-channel` (spawner.rb:202-205), and
+        the renderer is the only producer of that name. Inspecting by handle made
+        every later verb look for a pod that was never given that name: destroy
+        refused with "no pod for crew-1" while `archivist-silas` was running, and
+        the refusal read as absence rather than as a second spelling.
+        """
+        identity = self._identity_of(handle) if self._identity_of else None
+        if identity is None:
+            # No identity is recorded, so there is no name to derive. Inspecting the
+            # handle is the last resort and stays, because a refused spawn on an
+            # unregistered handle must still say "no pod", not "cannot look".
+            return handle
+        return instance_name(identity.identity, identity.channel)
+
     # -- reads ----------------------------------------------------------
     def health(self) -> tuple[bool, str]:
         try:
@@ -435,7 +452,7 @@ class NativeManager:
         facts: ContainerFacts | None = None
         if action in ACTIONS:
             try:
-                facts = self.runtime.inspect_container(handle)
+                facts = self.runtime.inspect_container(self._pod_name(handle))
             except RuntimeUnavailableError as exc:
                 # Cannot decide without facts; refuse rather than assume absence.
                 # The detail names the cause in the exception's own words: a runtime
@@ -564,7 +581,7 @@ class NativeManager:
             # The decision was made from facts read at `act()` time; this thread
             # runs later, so the world is re-read before the one call that makes a
             # pod (Bomu's D12-10e2: a direct `_execute` must not run a second one).
-            existing = self.runtime.inspect_container(handle)
+            existing = self.runtime.inspect_container(self._pod_name(handle))
             if existing is not None and existing.alive:
                 said = (f"{handle} is already alive; nothing to wake" if verb == "wake"
                         else f"{handle} is already alive; nothing to spawn (existing pod)")
@@ -668,7 +685,7 @@ class NativeManager:
                 # Named gap, not a silent skip: network.py has not landed.
                 mesh_note = "; mesh peer freeze not wired (network.py not landed)"
             try:
-                self.runtime.remove(handle)
+                self.runtime.remove(self._pod_name(handle))
             except RuntimeUnavailableError as exc:
                 return "failed", f"destroy of {handle} did not remove the pod: {exc}"
             self.store.record_launch(handle, boot_id=self.boot_id,
@@ -730,11 +747,17 @@ class NativeManager:
         deadline, so `timeout` means the deadline passed with no answer, not
         that the first read failed (F-8's clock note).
         """
+        # Resolve the name BEFORE the clock starts. `_pod_name` reads the agent
+        # store — a file read and a parse — and that is our bookkeeping, not the
+        # engine's response. The deadline exists to bound how long podman takes;
+        # letting a lookup inside it shorten a resident's freeze budget is the
+        # lookup leaking into a verdict.
+        pod = self._pod_name(handle)
         deadline = _parse(self.clock()) + timedelta(seconds=self.deadline)
         unreadable = ""
         while True:
             try:
-                facts = self.runtime.inspect_container(handle)
+                facts = self.runtime.inspect_container(pod)
             except RuntimeUnavailableError as exc:
                 unreadable = str(exc)
             else:
