@@ -11,6 +11,7 @@ it reach `succeeded` (H-6).
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from babo.office import hop, service
 from babo.office.actors import Actor
