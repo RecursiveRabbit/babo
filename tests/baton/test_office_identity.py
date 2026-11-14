@@ -28,12 +28,12 @@ def _record(store: AgentStore, handle: str = "crew-1") -> None:
 
 
 def test_a_missing_identity_is_refused_by_name(store: AgentStore) -> None:
-    with pytest.raises(identity_mod.IdentityMissing) as caught:
+    with pytest.raises(identity_mod.IdentityMissingError) as caught:
         identity_mod.identity_of(store, "ghost")
     assert "ghost" in str(caught.value), "the refusal names the handle"
 
     _record(store)
-    with pytest.raises(identity_mod.IdentityMissing) as caught:
+    with pytest.raises(identity_mod.IdentityMissingError) as caught:
         identity_mod.identity_of(store, "crew-1")
     message = str(caught.value)
     assert "crew-1" in message and "identity" in message and "channel" in message, message

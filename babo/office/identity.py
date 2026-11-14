@@ -21,7 +21,7 @@ from babo.office.store import AgentStore
 IDENTITY_KEYS = ("identity", "channel")
 
 
-class IdentityMissing(BatonError):
+class IdentityMissingError(BatonError):
     """A handle with no recorded identity, named so the caller can fix it."""
 
 
@@ -29,16 +29,16 @@ def identity_of(store: AgentStore, handle: str) -> Identity:
     """The identity and channel recorded for one handle, or a refusal by name."""
     entry = store.get(handle)
     if entry is None:
-        raise IdentityMissing(
+        raise IdentityMissingError(
             f"no agent '{handle}' is recorded here, so it has no identity; registration comes first"
         )
     missing = [key for key in IDENTITY_KEYS if key not in entry]
     if missing:
-        raise IdentityMissing(
+        raise IdentityMissingError(
             f"agent '{handle}' has no recorded {', '.join(missing)}; "
             "registration must write both keys (set_identity) before it can spawn"
         )
     identity = str(entry["identity"]).strip()
     if not identity:
-        raise IdentityMissing(f"agent '{handle}' has an empty identity; that is not a name")
+        raise IdentityMissingError(f"agent '{handle}' has an empty identity; that is not a name")
     return Identity(identity=identity, channel=str(entry["channel"]).strip())
