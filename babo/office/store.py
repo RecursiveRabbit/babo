@@ -85,6 +85,13 @@ class AgentStore:
                 "created": str(previous.get("created") or now_iso()),
                 "updated": now_iso(),
             }
+            # Identity and channel travel with the entry, and are carried through an
+            # upsert that does not mention them. Absence is preserved: a row written
+            # before this existed stays unregistered rather than acquiring a blank
+            # identity it never had.
+            for key in ("identity", "channel"):
+                if key in entry or key in previous:
+                    saved[key] = str(entry.get(key, previous.get(key)) or "")
             agents[handle] = saved
             atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return saved
@@ -123,6 +130,27 @@ class AgentStore:
             raise BatonError(f"'{handle}' isn't recorded here, so it has no desired state to change")
         entry["desired"] = desired
         self.upsert(entry)
+
+    def set_identity(self, handle: str, identity: str, channel: str = "") -> dict[str, Any]:
+        """Record who this handle is, and on which channel it runs.
+
+        The writer the core has been missing: `spawn` refuses without an identity
+        ("no identity/channel recorded for {handle}"), and until now nothing in the
+        office line wrote one. Both keys are written, and `channel` may be empty —
+        that is the singleton case, and it is a fact rather than an absence.
+
+        The handle must already be recorded: registration is `record_agent`, and
+        this attaches to it rather than inventing a second way to make an agent.
+        """
+        entry = self.get(handle)
+        if entry is None:
+            raise BatonError(f"'{handle}' isn't recorded here, so there is no agent to name")
+        clean_identity = identity.strip()
+        if not clean_identity:
+            raise BatonError("an agent's identity cannot be empty; it is the name the Router and the store key on")
+        entry["identity"] = clean_identity
+        entry["channel"] = channel.strip()
+        return self.upsert(entry)
 
 
 class CrewStore:
