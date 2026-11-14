@@ -82,9 +82,13 @@ def test_every_path_the_client_calls_is_answered_by_the_listener() -> None:
         restarted = client.restart_ui("sessions leaked", actor=Actor("host_operator", "host-wg"))
         assert restarted.ok and restarted.status == 202
 
+        # The read half is answered by the listener, but this fixture's core exposes
+        # no action store, so the service answers 503 with its own sentence. What
+        # this row proves is the dispatch: the path is served and the service spoke.
+        # The 200-with-a-row case is tests/baton/test_office_restart_read.py, which
+        # runs the real core and the real store.
         latest = client.restart_latest()
-        assert latest.ok and latest.payload["state"] == "succeeded"
-        assert latest.payload["actor"] == "host_operator" and latest.payload["actor_source"] == "host-wg"
+        assert latest.status == 503 and "no action store" in latest.said, latest.said
     finally:
         server.shutdown()
         server.server_close()
