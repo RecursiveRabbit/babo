@@ -96,6 +96,9 @@ from babo.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
 from babo.webui.http_utils import (
+    peer_host as _peer_host,
+)
+from babo.webui.http_utils import (
     query_first as _query_first,
 )
 from babo.webui.http_utils import (
@@ -784,7 +787,17 @@ class GatewayHTTPHandler:
                 if not _issue_route_secret_matches(request.headers, secret):
                     return _http_error(401, "Unauthorized")
             elif not (is_local_browser or is_trusted_source):
-                return _http_error(403, "bootstrap is localhost-only, or from a configured trusted source")
+                # A refusal that does not say who was refused cannot be acted on from
+                # the client side: the operator sees 'not trusted' and has to guess
+                # which address the server actually saw. The peer address is the one
+                # the check above already used — never a header, which the client
+                # controls.
+                rejected = _peer_host(connection) or "an address the transport did not report"
+                return _http_error(
+                    403,
+                    "bootstrap is localhost-only, or from a configured trusted source; "
+                    f"{rejected} is neither",
+                )
 
         from babo.webui.client_contract import gateway_identity
 
