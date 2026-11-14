@@ -20,7 +20,6 @@ from babo.office.service import ManagerService
 from baton.office_fakes import FakeCore
 
 UI = "10.0.0.11"
-OP = "10.0.0.2"
 
 
 def _core(**kwargs: object) -> FakeCore:
@@ -300,7 +299,7 @@ def _ask(svc: ManagerService, handle: str, action: str) -> dict[str, Any]:
 
 def test_a_wake_is_pending_then_the_managers_answer_is_succeeded() -> None:
     core = _core()
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
     status, started = svc.act(UI, {"handle": "crew-1", "action": "wake", "reason": "owner asked",
                                    "actor": "owner", "actor_source": "webui-session"})
     assert status == 202 and started["action_id"]
@@ -311,14 +310,14 @@ def test_a_wake_is_pending_then_the_managers_answer_is_succeeded() -> None:
 
 def test_freezing_says_released_not_paused_and_not_saved() -> None:
     core = FakeCore(agents_by_handle={"crew-1": AgentObserved(handle="crew-1", state="alive")})
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
     op = _ask(svc, "crew-1", "freeze")
     assert op["state"] == "succeeded" and "pod released" in op["detail"] and "paused" not in op["detail"]
 
 
 def test_a_failed_action_says_why_and_leaves_the_record_alone() -> None:
     core = _core(fail={"wake"})
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
     op = _ask(svc, "crew-1", "wake")
     assert op["state"] == "failed" and "failed at the runtime" in op["detail"]
     assert core.agents_by_handle["crew-1"].state == "frozen", "a failed action must not move the record"
@@ -327,7 +326,7 @@ def test_a_failed_action_says_why_and_leaves_the_record_alone() -> None:
 def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page() -> None:
     """One refusal, one place: the Manager asks, the core declines by name (L-02/L-03)."""
     core = _core()
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
     op = _ask(svc, "ghost", "wake")
     assert op["state"] == "refused" and "record it first" in op["detail"]
 
@@ -335,7 +334,7 @@ def test_an_unrecorded_agent_is_refused_by_the_core_not_by_the_page() -> None:
 def test_the_other_three_verbs_ride_the_same_path_and_report_the_cores_word() -> None:
     """spawn/rescue/destroy ride the same pending→verdict path; no friendlier synonyms."""
     core = _core()
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
     for verb in ("spawn", "rescue", "destroy"):
         op = _ask(svc, "crew-1", verb)
         assert op["state"] == "refused", verb
@@ -373,7 +372,7 @@ def test_the_client_admits_by_source_and_refuses_by_name() -> None:
 def test_the_manager_admits_by_source_and_refuses_by_name() -> None:
     core = _core()
     core.agents_by_handle[service.UI_POD] = AgentObserved(handle=service.UI_POD, state="alive")
-    svc = ManagerService(core=core, ui_peers=(UI,), operator_peers=(OP,))
+    svc = ManagerService(core=core, ui_peers=(UI,))
 
     # source right, name wrong
     status, _payload = svc.restart_ui(UI, {"reason": "leaked", "actor": "somebody",
