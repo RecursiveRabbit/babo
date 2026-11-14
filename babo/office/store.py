@@ -95,15 +95,12 @@ class AgentStore:
             agents[handle] = saved
             atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return saved
-            atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
-        return saved
 
     def remove(self, handle: str) -> bool:
         with self._lock:
             agents = self.load()
             if agents.pop(_handle(handle), None) is None:
                 return False
-            atomic_write(self.path, json.dumps({"agents": agents}, indent=2, sort_keys=True) + "\n")
         return True
 
     # -- checked changes --------------------------------------------------
